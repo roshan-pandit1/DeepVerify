@@ -7,6 +7,7 @@ aiofiles==24.1.0
 # Database
 sqlalchemy==2.0.36
 aiosqlite==0.20.0
+asyncpg==0.30.0
 supabase
 
 # Pipeline: C2PA
@@ -21,7 +22,7 @@ torch>=2.9.0
 torchvision
 timm
 facenet-pytorch
-grad-cam
+grad-cam==1.4.8
 Pillow
 numpy>=2.0.0
 scipy
