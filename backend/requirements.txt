@@ -22,7 +22,11 @@ torch>=2.9.0
 torchvision
 timm
 facenet-pytorch
-grad-cam==1.4.8
+grad-cam==1.4.8 --no-deps
+ttach
+matplotlib
+tqdm
+scikit-learn
 Pillow
 numpy>=2.0.0
 scipy
