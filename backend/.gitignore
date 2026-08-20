@@ -1,0 +1,34 @@
+# Environments
+.env
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Logs
+*.log
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Large Media Files
+*.mp4
+*.mp4.part
+*.mov
+*.mkv
+*.webm
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

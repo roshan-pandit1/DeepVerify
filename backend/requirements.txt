@@ -1,0 +1,39 @@
+# FastAPI Core
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+aiofiles==24.1.0
+
+# Database
+sqlalchemy==2.0.36
+aiosqlite==0.20.0
+supabase
+
+# Pipeline: C2PA
+c2pa-python==0.37.7
+
+# Pipeline: Video / Audio
+yt-dlp
+opencv-python-headless==4.10.0.84
+
+# Pipeline: Vision / ML
+torch>=2.9.0
+torchvision
+timm
+facenet-pytorch
+grad-cam
+Pillow
+numpy>=2.0.0
+scipy
+
+# Pipeline: Audio / LLM / OSINT
+groq==0.13.0
+openai==1.57.2
+anthropic==0.40.0
+google-search-results==2.4.2
+
+# Environment & Utilities
+python-dotenv==1.0.1
+httpx
+pydantic
+pydantic-settings
