@@ -1,2 +1,0 @@
-[phases.setup]
-aptPkgs = ["ffmpeg", "libglib2.0-0", "libgl1-mesa-glx", "libxcb1", "libxcb-shape0", "libxcb-xfixes0"]
