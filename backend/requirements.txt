@@ -17,14 +17,14 @@ c2pa-python==0.37.7
 
 # Pipeline: Video / Audio
 yt-dlp
-opencv-python-headless==4.9.0.80
+opencv-python==4.9.0.80
 
 # Pipeline: Vision / ML
 torch
 torchvision
 timm
 facenet-pytorch
-grad-cam==1.4.8 --no-deps
+grad-cam==1.4.8
 ttach
 matplotlib
 tqdm
