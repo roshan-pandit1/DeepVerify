@@ -1,3 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 # FastAPI Core
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
@@ -18,7 +20,7 @@ yt-dlp
 opencv-python-headless==4.9.0.80
 
 # Pipeline: Vision / ML
-torch>=2.9.0
+torch
 torchvision
 timm
 facenet-pytorch
