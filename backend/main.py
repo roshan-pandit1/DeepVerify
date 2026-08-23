@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from sqlalchemy import select
 from config import get_settings
 from database import Job, JobStatus, AsyncSessionLocal, init_db
 from pipeline.orchestrator import run_pipeline
@@ -242,6 +243,28 @@ async def get_report(job_id: str):
         )
 
     return JSONResponse(content=result)
+
+
+@app.get("/api/jobs", summary="Retrieve a list of recent jobs")
+async def get_jobs(limit: int = 20):
+    """
+    Returns the most recent jobs processed by the engine.
+    """
+    async with AsyncSessionLocal() as session:
+        stmt = select(Job).order_by(Job.created_at.desc()).limit(limit)
+        result = await session.execute(stmt)
+        jobs = result.scalars().all()
+
+    return [
+        {
+            "job_id": j.id,
+            "status": j.status.value,
+            "source_type": j.source_type,
+            "original_filename": j.original_filename,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+        }
+        for j in jobs
+    ]
 
 
 @app.get("/health")

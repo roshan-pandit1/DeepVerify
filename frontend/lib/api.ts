@@ -119,13 +119,38 @@ export interface VideoMeta {
   keyframe_paths: string[];
 }
 
+export interface AttributionResult {
+  resemble_source: string;
+  patient_zero_date: string | null;
+  patient_zero_url: string | null;
+  culprit_handles: string[];
+}
+
+export interface BlockchainResult {
+  /** "sealed" = on-chain confirmed, "off_chain" = no keys set, "pending" = tx broadcast but not confirmed */
+  status: "sealed" | "off_chain" | "pending";
+  /** Hex SHA-256 of the raw video file bytes */
+  sha256?: string | null;
+  /** Perceptual hash fingerprint (imagehash pHash) */
+  phash?: string | null;
+  /** IPFS CID of the pinned forensic report JSON */
+  ipfs_cid?: string | null;
+  /** On-chain transaction hash (0x-prefixed) */
+  tx_hash?: string | null;
+  /** ISO-8601 timestamp of when the tx was confirmed */
+  timestamp?: string | null;
+}
+
 export interface ReportResponse {
   job_id: string;
   verdict: VerdictResult;
   audio: AudioResult;
   vision: VisionResult;
   osint: OsintResult;
+  attribution: AttributionResult;
   video_meta: VideoMeta;
+  /** Blockchain provenance metadata — absent on jobs run before this feature was added */
+  blockchain?: BlockchainResult;
 }
 
 // ── API Functions ──────────────────────────────────────────────────────────
@@ -182,4 +207,19 @@ export function staticUrl(path: string | null): string | null {
   // FastAPI serves /tmp at /static/
   const rel = path.replace(/^\/tmp\//, "");
   return `${API_BASE}/static/${rel}`;
+}
+
+export interface JobListItem {
+  job_id: string;
+  status: string;
+  source_type: string;
+  original_filename: string | null;
+  created_at: string | null;
+}
+
+/** Fetch recent jobs. */
+export async function getJobs(limit = 20): Promise<JobListItem[]> {
+  const res = await fetch(`${API_BASE}/api/jobs?limit=${limit}`);
+  if (!res.ok) throw new Error(`Jobs fetch failed: ${res.status}`);
+  return res.json();
 }

@@ -17,11 +17,12 @@ c2pa-python==0.37.7
 
 # Pipeline: Video / Audio
 yt-dlp
-opencv-python==4.9.0.80
+opencv-python-headless>=4.10.0.84
 
 # Pipeline: Vision / ML
 torch
 torchvision
+transformers
 timm
 facenet-pytorch
 grad-cam==1.4.8
@@ -38,6 +39,11 @@ groq==0.13.0
 openai==1.57.2
 anthropic==0.40.0
 google-search-results==2.4.2
+dateparser
+
+# Blockchain / IPFS Provenance
+web3>=6.0.0
+imagehash>=4.3.0
 
 # Environment & Utilities
 python-dotenv==1.0.1

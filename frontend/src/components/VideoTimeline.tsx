@@ -36,7 +36,7 @@ export function VideoTimeline({ videoPath, events, duration }: VideoTimelineProp
 
     // Filled track
     const prog = (currentTime / videoDuration) * W;
-    ctx.fillStyle = "#6366f1";
+    ctx.fillStyle = "#0ea5e9";
     ctx.beginPath();
     ctx.roundRect(0, H / 2 - 3, prog, 6, 3);
     ctx.fill();
@@ -56,7 +56,7 @@ export function VideoTimeline({ videoPath, events, duration }: VideoTimelineProp
     });
 
     // Playhead
-    ctx.fillStyle = "#4f46e5";
+    ctx.fillStyle = "#0284c7";
     ctx.beginPath();
     ctx.arc(prog, H / 2, 8, 0, 2 * Math.PI);
     ctx.fill();

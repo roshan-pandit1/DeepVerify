@@ -3,11 +3,14 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { getReport, staticUrl } from "../../../../lib/api";
 import { ReportHeader } from "../../../components/ReportHeader";
+import { DeepVerifyLogo } from "../../../components/DeepVerifyLogo";
 import { FindingsPanel } from "../../../components/FindingsPanel";
 import { TranscriptViewer } from "../../../components/TranscriptViewer";
 import { OsintMatches } from "../../../components/OsintMatches";
 import { VideoTimeline } from "../../../components/VideoTimeline";
 import { HeatmapViewer } from "../../../components/HeatmapViewer";
+import OriginTracker from "../../../components/OriginTracker";
+import { BlockchainCertificate } from "../../../components/BlockchainCertificate";
 import type { Metadata } from "next";
 
 // SSR — fetch at request time
@@ -48,7 +51,7 @@ async function ReportPage({ params }: PageProps) {
             <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
               <a href={`/report/${id}`} style={{
                 padding: "10px 20px", borderRadius: "var(--radius-md)",
-                background: "linear-gradient(135deg, var(--indigo-600), #7c3aed)",
+                background: "linear-gradient(135deg, var(--indigo-600), #38bdf8)",
                 color: "#fff", fontWeight: 700, textDecoration: "none", fontSize: "0.875rem",
               }}>
                 Refresh Page
@@ -108,29 +111,23 @@ async function ReportPage({ params }: PageProps) {
       {/* Nav */}
       <nav style={{
         position: "sticky", top: 0, zIndex: 10,
-        background: "rgba(255,255,255,0.9)", backdropFilter: "blur(12px)",
+        background: "rgba(255, 255, 255, 0.9)", backdropFilter: "blur(12px)",
         borderBottom: "1px solid var(--border)",
         padding: "0 32px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         height: "60px",
       }}>
-        <Link href="/" style={{
-          display: "flex", alignItems: "center", gap: "10px", textDecoration: "none",
-        }}>
-          <div style={{
-            width: "32px", height: "32px", borderRadius: "var(--radius-md)",
-            background: "linear-gradient(135deg, var(--indigo-600), #7c3aed)",
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem",
-          }}>
-            🔍
+        <div style={{ display: "flex", alignItems: "center", gap: "24px" }}>
+          <DeepVerifyLogo />
+          <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+            <Link href="/" style={{ color: "var(--text-muted)", textDecoration: "none", fontWeight: 500, fontSize: "0.9rem" }}>
+              New Scan
+            </Link>
+            <Link href="/history" style={{ color: "var(--text-muted)", textDecoration: "none", fontWeight: 500, fontSize: "0.9rem" }}>
+              History
+            </Link>
           </div>
-          <span style={{ fontWeight: 800, fontSize: "1rem", color: "var(--text-primary)" }}>
-            Deep<span style={{
-              background: "linear-gradient(135deg, var(--indigo-600), #7c3aed)",
-              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-            }}>Verify</span>
-          </span>
-        </Link>
+        </div>
         <span style={{
           fontSize: "0.8rem", color: "var(--text-muted)",
           fontFamily: "JetBrains Mono, monospace",
@@ -190,7 +187,15 @@ async function ReportPage({ params }: PageProps) {
           {/* Right column — sticky findings */}
           <div style={{ position: "sticky", top: "76px" }}>
             <div className="animate-fade-in-up" style={{ animationDelay: "0.05s" }}>
+              <OriginTracker data={report.attribution} />
               <FindingsPanel verdict={verdict} vision={vision} />
+              {/* Blockchain Provenance Certificate */}
+              <BlockchainCertificate
+                data={report.blockchain}
+                blockExplorerUrl={
+                  process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ?? "https://amoy.polygonscan.com"
+                }
+              />
             </div>
           </div>
         </div>

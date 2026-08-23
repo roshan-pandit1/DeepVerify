@@ -162,28 +162,71 @@ def _run_gradcam(model, input_tensor: torch.Tensor, face_crop_np: np.ndarray,
 
 
 # ---------------------------------------------------------------------------
-# Frequency-domain heuristic (used when no fine-tuned weights are available)
+# ---------------------------------------------------------------------------
+# Hugging Face Vision Transformer Deepfake Classifier
 # ---------------------------------------------------------------------------
 
-def _frequency_heuristic(face_bgr: np.ndarray) -> float:
-    """
-    Estimate manipulation likelihood using DCT frequency analysis.
-    AI-generated faces often have unnaturally smooth high-frequency components.
-    Returns a score in [0, 1].
-    """
-    gray = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    dct = cv2.dct(gray)
-    # High-frequency energy ratio (top-right quadrant of DCT)
-    h, w = dct.shape
-    hf_energy = np.sum(np.abs(dct[h // 2:, w // 2:])) + 1e-9
-    total_energy = np.sum(np.abs(dct)) + 1e-9
-    hf_ratio = hf_energy / total_energy
+_deepfake_detector = None
 
-    # Lower HF ratio → smoother → higher suspicion
-    # Typical real photos: ~0.05–0.15 HF ratio
-    # AI/smoothed: < 0.04
-    score = max(0.0, min(1.0, 1.0 - (hf_ratio / 0.12)))
-    return float(score)
+
+def _get_deepfake_detector():
+    """Lazy-load the Hugging Face pipeline so it loads into memory exactly once."""
+    global _deepfake_detector
+    if _deepfake_detector is None:
+        from transformers import pipeline as hf_pipeline
+        logger.info("Loading pretrained Deepfake model from Hugging Face (dima806/deepfake_vs_real_image_detection)...")
+        _deepfake_detector = hf_pipeline("image-classification", model="dima806/deepfake_vs_real_image_detection")
+    return _deepfake_detector
+
+
+def analyze_facial_artifacts(frame_path: str) -> float:
+    """
+    Analyzes a frame using a fine-tuned pretrained Deepfake AI model.
+    Returns a float between 0.0 (Authentic) and 1.0 (Deepfake).
+    """
+    try:
+        detector = _get_deepfake_detector()
+        # Load image using Pillow
+        img = Image.open(frame_path).convert('RGB')
+        
+        # Run inference
+        results = detector(img)
+        
+        # The model returns a list of dictionaries, e.g.,
+        # [{'label': 'fake', 'score': 0.98}, {'label': 'real', 'score': 0.02}]
+        
+        fake_score = 0.0
+        
+        # Extract the confidence score for the 'fake' label
+        for result in results:
+            if result['label'].lower() == 'fake':
+                fake_score = result['score']
+                break
+                
+        return float(fake_score)
+        
+    except Exception as e:
+        logger.error(f"Error processing frame {frame_path}: {e}")
+        return 0.0  # Default to safe on error
+
+
+def analyze_video_multi_frame_average(frame_paths: list[str]) -> float:
+    """
+    Extracts 3 clear frames at 25%, 50%, and 75% of video duration,
+    passes all three to analyze_facial_artifacts, and returns the average score.
+    """
+    if not frame_paths:
+        return 0.0
+    
+    n = len(frame_paths)
+    if n >= 3:
+        target_indices = [int(n * 0.25), int(n * 0.50), int(n * 0.75)]
+        sampled_frames = [frame_paths[idx] for idx in target_indices]
+    else:
+        sampled_frames = frame_paths
+
+    scores = [analyze_facial_artifacts(fp) for fp in sampled_frames]
+    return float(sum(scores) / len(scores)) if scores else 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -237,30 +280,39 @@ def run_vision_pipeline(
             logger.debug("MTCNN error on frame %s: %s", frame_path, exc)
             boxes, probs = None, None
 
-        if boxes is None or len(boxes) == 0:
-            frame_scores.append(FrameScore(
-                frame_path=frame_path,
-                timestamp=timestamp,
-                face_detected=False,
-                manipulation_score=0.0,
-            ))
-            continue
-
-        total_faces += len(boxes)
-
-        # Process only the highest-confidence face per frame
-        best_idx = int(np.argmax(probs)) if probs is not None else 0
-        box = boxes[best_idx]
-        x1, y1, x2, y2 = [max(0, int(c)) for c in box]
-        face_crop_bgr = img_bgr[y1:y2, x1:x2]
-        if face_crop_bgr.size == 0:
-            continue
-        face_crop_bgr = cv2.resize(face_crop_bgr, (224, 224))
+        mtcnn_face_found = (boxes is not None and len(boxes) > 0)
 
         # --- Scoring ---
         if use_heuristic:
-            score = _frequency_heuristic(face_crop_bgr)
+            score = analyze_facial_artifacts(frame_path)
+            face_found = mtcnn_face_found or (score > 0.0)
+            if not face_found and not mtcnn_face_found:
+                frame_scores.append(FrameScore(
+                    frame_path=frame_path,
+                    timestamp=timestamp,
+                    face_detected=False,
+                    manipulation_score=0.0,
+                ))
+                continue
         else:
+            if not mtcnn_face_found:
+                frame_scores.append(FrameScore(
+                    frame_path=frame_path,
+                    timestamp=timestamp,
+                    face_detected=False,
+                    manipulation_score=0.0,
+                ))
+                continue
+
+            # Process only the highest-confidence face per frame
+            best_idx = int(np.argmax(probs)) if probs is not None else 0
+            box = boxes[best_idx]
+            x1, y1, x2, y2 = [max(0, int(c)) for c in box]
+            face_crop_bgr = img_bgr[y1:y2, x1:x2]
+            if face_crop_bgr.size == 0:
+                continue
+            face_crop_bgr = cv2.resize(face_crop_bgr, (224, 224))
+
             face_crop_rgb = cv2.cvtColor(face_crop_bgr, cv2.COLOR_BGR2RGB)
             pil_face = Image.fromarray(face_crop_rgb)
             tensor = _transform(pil_face).unsqueeze(0).to(device)
@@ -269,10 +321,28 @@ def run_vision_pipeline(
                 probs_out = torch.softmax(logits, dim=1)
                 score = float(probs_out[0][1].item())  # class 1 = manipulated
 
+        if mtcnn_face_found:
+            total_faces += len(boxes)
+        elif score > 0.0:
+            total_faces += 1
+
         # --- Grad-CAM for suspicious frames ---
         gradcam_path = None
         if score > 0.60:
             cam_save = os.path.join(gradcam_dir, f"gradcam_{idx:05d}_{timestamp:.2f}s.png")
+            # If MTCNN found box, use it for gradcam crop, else use full frame center crop
+            if mtcnn_face_found:
+                best_idx = int(np.argmax(probs)) if probs is not None else 0
+                box = boxes[best_idx]
+                x1, y1, x2, y2 = [max(0, int(c)) for c in box]
+                face_crop_bgr = img_bgr[y1:y2, x1:x2]
+                if face_crop_bgr.size > 0:
+                    face_crop_bgr = cv2.resize(face_crop_bgr, (224, 224))
+                else:
+                    face_crop_bgr = cv2.resize(img_bgr, (224, 224))
+            else:
+                face_crop_bgr = cv2.resize(img_bgr, (224, 224))
+
             face_crop_rgb = cv2.cvtColor(face_crop_bgr, cv2.COLOR_BGR2RGB)
             pil_face = Image.fromarray(face_crop_rgb)
             tensor = _transform(pil_face).unsqueeze(0).to(device)

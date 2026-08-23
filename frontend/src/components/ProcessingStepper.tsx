@@ -17,11 +17,24 @@ interface ProcessingStepperProps {
   status: StageStatus;
   currentStep: number;
   errorMessage?: string | null;
+  onReset?: () => void;
 }
 
-export function ProcessingStepper({ status, currentStep, errorMessage }: ProcessingStepperProps) {
+export function ProcessingStepper({ status, currentStep, errorMessage, onReset }: ProcessingStepperProps) {
   const isFailed = status === "failed";
   const isComplete = status === "complete";
+  
+  let parsedError: any = null;
+  let errorMsgString = errorMessage;
+  
+  if (errorMessage && errorMessage.startsWith("{")) {
+    try {
+      parsedError = JSON.parse(errorMessage);
+      errorMsgString = parsedError.message;
+    } catch (e) {}
+  }
+  
+  const isRestricted = parsedError?.error_code === "PRIVATE_OR_RESTRICTED_MEDIA";
 
   return (
     <div style={{ width: "100%", maxWidth: "560px", margin: "0 auto" }}>
@@ -42,10 +55,44 @@ export function ProcessingStepper({ status, currentStep, errorMessage }: Process
           </div>
         ) : isFailed ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
-            <XCircle size={40} color="var(--rose-500)" />
-            <p style={{ fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>Analysis Failed</p>
-            {errorMessage && (
-              <p style={{ fontSize: "0.85rem", color: "var(--rose-500)", maxWidth: "400px" }}>{errorMessage}</p>
+            {isRestricted ? (
+              <>
+                <div style={{
+                  background: "var(--amber-50)", padding: "16px", borderRadius: "12px", border: "1px solid var(--amber-200)",
+                  textAlign: "center", width: "100%"
+                }}>
+                  <XCircle size={32} color="var(--amber-600)" style={{ margin: "0 auto 8px" }} />
+                  <p style={{ fontWeight: 700, color: "var(--amber-700)", margin: "0 0 4px" }}>
+                    Private or Login-Gated Media Detected
+                  </p>
+                  <p style={{ fontSize: "0.85rem", color: "var(--amber-700)", margin: "0 0 16px" }}>
+                    {parsedError.actionable_hint || "This content is restricted by the platform to authorized followers or logged-in users."}
+                  </p>
+                  
+                  {onReset && (
+                    <button
+                      onClick={onReset}
+                      style={{
+                        padding: "8px 16px", background: "var(--amber-600)", color: "#fff",
+                        fontWeight: 600, fontSize: "0.85rem", borderRadius: "8px", border: "none",
+                        cursor: "pointer", transition: "background 0.2s"
+                      }}
+                      onMouseOver={(e) => (e.currentTarget.style.background = "var(--amber-700)")}
+                      onMouseOut={(e) => (e.currentTarget.style.background = "var(--amber-600)")}
+                    >
+                      Upload Video File Directly
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <XCircle size={40} color="var(--rose-500)" />
+                <p style={{ fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>Analysis Failed</p>
+                {errorMsgString && (
+                  <p style={{ fontSize: "0.85rem", color: "var(--rose-500)", maxWidth: "400px" }}>{errorMsgString}</p>
+                )}
+              </>
             )}
           </div>
         ) : (

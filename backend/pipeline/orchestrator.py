@@ -19,8 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
 from database import AsyncSessionLocal, Job, JobStatus
-from pipeline import c2pa_inspector, video_processor, vision_model, osint_engine
+from pipeline import c2pa_inspector, video_processor, vision_model, osint_engine, resemble_service
 from pipeline.telegram_notifier import send_verdict_notification
+from pipeline.blockchain_service import BlockchainService
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,15 @@ async def run_pipeline(job_id: str):
             proc_result = await video_processor.process_uploaded_file(job_id, video_path)
 
         if proc_result.error:
-            error_msg = f"Ingestion failed: {proc_result.error}"
+            if proc_result.error_code == "PRIVATE_OR_RESTRICTED_MEDIA":
+                error_msg = json.dumps({
+                    "error_code": "PRIVATE_OR_RESTRICTED_MEDIA",
+                    "message": "This video is from a private account or requires authentication.",
+                    "actionable_hint": "Our servers cannot bypass private account walls. Please screen-record or download the video directly to your device and use the file uploader."
+                })
+            else:
+                error_msg = f"Ingestion failed: {proc_result.error}"
+
             await _update_job(
                 job_id,
                 status=JobStatus.FAILED,
@@ -85,11 +94,19 @@ async def run_pipeline(job_id: str):
                 from pipeline.telegram_notifier import httpx
                 settings = get_settings()
                 url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+                
+                # Format a clean message instead of dumping JSON
+                display_msg = proc_result.error
+                cookie_hint = ""
+                if proc_result.error_code == "PRIVATE_OR_RESTRICTED_MEDIA":
+                    display_msg = "This video is from a private account or requires authentication."
+                    cookie_hint = "\n\n(Optional) If you want your backend to access login-gated videos, export your session cookies using a browser extension (like Get cookies.txt LOCALLY) and save the file as backend/cookies.txt"
+                
                 try:
                     async with httpx.AsyncClient() as client:
                         await client.post(url, json={
                             "chat_id": telegram_chat_id,
-                            "text": f"❌ Analysis Failed\n\n{error_msg}\n\nThis usually happens with private Instagram/TikTok videos that require a login."
+                            "text": f"❌ Analysis Failed\n\n{display_msg}{cookie_hint}"
                         })
                 except Exception:
                     pass
@@ -124,135 +141,145 @@ async def run_pipeline(job_id: str):
         return
 
     # ------------------------------------------------------------------ #
-    # Stage 2: C2PA Cryptographic Check
+    # Stages 2–5: Run C2PA, Audio, Vision, OSINT in PARALLEL
     # ------------------------------------------------------------------ #
     await _update_job(job_id, status=JobStatus.C2PA)
-    logger.info("[%s] Stage 2: C2PA inspection", job_id)
+    logger.info("[%s] Stages 2-5: Running C2PA / Audio / Vision / OSINT in parallel", job_id)
 
-    c2pa_data: dict = {}
-    try:
-        c2pa_res = c2pa_inspector.inspect(proc_result.video_path)
-        c2pa_data = dataclasses.asdict(c2pa_res)
-        c2pa_data.pop("raw_manifest", None)   # Don't store full raw manifest in result
-    except Exception as exc:
-        logger.warning("[%s] C2PA stage error (non-fatal): %s", job_id, exc)
-        c2pa_data = {"status": "error", "message": str(exc), "is_ai_generated": False}
-
-    # ------------------------------------------------------------------ #
-    # Stage 3: Audio Extraction & Transcription
-    # ------------------------------------------------------------------ #
-    await _update_job(job_id, status=JobStatus.AUDIO)
-    logger.info("[%s] Stage 3: Audio transcription", job_id)
-
-    audio_data: dict = {}
-    try:
-        audio_res = await osint_engine.transcribe_audio(job_id, proc_result.audio_path)
-        audio_data = {
-            "full_text": audio_res.full_text,
-            "language": audio_res.language,
-            "duration": audio_res.duration,
-            "skipped": audio_res.skipped,
-            "skip_reason": audio_res.skip_reason,
-            "segments": [
-                {"start": s.start, "end": s.end, "text": s.text}
-                for s in audio_res.transcript_segments
-            ],
-        }
-    except Exception as exc:
-        logger.warning("[%s] Audio stage error (non-fatal): %s", job_id, exc)
-        audio_data = {"skipped": True, "skip_reason": str(exc), "segments": []}
-
-    # ------------------------------------------------------------------ #
-    # Stage 4: Face Extraction, EfficientNet Scoring, Grad-CAM
-    # ------------------------------------------------------------------ #
-    await _update_job(job_id, status=JobStatus.VISION)
-    logger.info("[%s] Stage 4: Vision analysis", job_id)
-
-    vision_data: dict = {}
     gradcam_dir = f"/tmp/uploads/{job_id}/gradcam"
+    has_weights = bool(os.getenv("MODEL_WEIGHTS_PATH", "").strip())
+    loop = asyncio.get_event_loop()
 
-    try:
-        has_weights = bool(os.getenv("MODEL_WEIGHTS_PATH", "").strip())
-        # Run in thread executor to avoid blocking async loop with CPU-bound work
-        loop = asyncio.get_event_loop()
-        vision_res = await loop.run_in_executor(
-            None,
-            lambda: vision_model.run_vision_pipeline(
+    # ── helpers that each return their data dict ───────────────────────
+
+    async def _run_c2pa() -> dict:
+        try:
+            c2pa_res = c2pa_inspector.inspect(proc_result.video_path)
+            data = dataclasses.asdict(c2pa_res)
+            data.pop("raw_manifest", None)
+            return data
+        except Exception as exc:
+            logger.warning("[%s] C2PA error (non-fatal): %s", job_id, exc)
+            return {"status": "error", "message": str(exc), "is_ai_generated": False}
+
+    async def _run_audio() -> tuple[dict, dict]:
+        audio: dict = {}
+        resemble: dict = {}
+        try:
+            audio_res = await osint_engine.transcribe_audio(job_id, proc_result.audio_path)
+            audio = {
+                "full_text": audio_res.full_text,
+                "language": audio_res.language,
+                "duration": audio_res.duration,
+                "skipped": audio_res.skipped,
+                "skip_reason": audio_res.skip_reason,
+                "segments": [
+                    {"start": s.start, "end": s.end, "text": s.text}
+                    for s in audio_res.transcript_segments
+                ],
+            }
+        except Exception as exc:
+            logger.warning("[%s] Audio error (non-fatal): %s", job_id, exc)
+            audio = {"skipped": True, "skip_reason": str(exc), "segments": []}
+
+        try:
+            resemble = await resemble_service.run_audio_attribution(job_id, proc_result.audio_path)
+        except Exception as exc:
+            logger.warning("[%s] Resemble AI error: %s", job_id, exc)
+            resemble = {"source": "Unknown", "confidence": 0.0, "error": str(exc)}
+
+        return audio, resemble
+
+    async def _run_vision() -> dict:
+        try:
+            vision_res = await loop.run_in_executor(
+                None,
+                lambda: vision_model.run_vision_pipeline(
+                    job_id=job_id,
+                    frame_paths=proc_result.frame_paths,
+                    gradcam_dir=gradcam_dir,
+                    has_fine_tuned_weights=has_weights,
+                ),
+            )
+            return {
+                "facial_artifact_score": vision_res.facial_artifact_score,
+                "faces_detected": vision_res.faces_detected,
+                "frames_analyzed": vision_res.frames_analyzed,
+                "skipped_reason": vision_res.skipped_reason,
+                "error": vision_res.error,
+                "frame_scores": [
+                    {
+                        "frame_path": fs.frame_path,
+                        "timestamp": fs.timestamp,
+                        "face_detected": fs.face_detected,
+                        "manipulation_score": fs.manipulation_score,
+                        "gradcam_path": fs.gradcam_path,
+                    }
+                    for fs in vision_res.frame_scores
+                ],
+                "suspicious_frames": [
+                    {
+                        "frame_path": fs.frame_path,
+                        "timestamp": fs.timestamp,
+                        "manipulation_score": fs.manipulation_score,
+                        "gradcam_path": fs.gradcam_path,
+                    }
+                    for fs in vision_res.suspicious_frames
+                ],
+            }
+        except Exception as exc:
+            logger.warning("[%s] Vision error (non-fatal): %s", job_id, exc)
+            return {
+                "facial_artifact_score": 0.0,
+                "faces_detected": 0,
+                "frames_analyzed": 0,
+                "error": str(exc),
+                "frame_scores": [],
+                "suspicious_frames": [],
+            }
+
+    async def _run_osint() -> dict:
+        try:
+            osint_res = await osint_engine.run_reverse_image_search(
                 job_id=job_id,
-                frame_paths=proc_result.frame_paths,
-                gradcam_dir=gradcam_dir,
-                has_fine_tuned_weights=has_weights,
-            ),
-        )
+                keyframe_paths=proc_result.keyframe_paths,
+                api_base_url=settings.api_base_url,
+            )
+            return {
+                "matches": [
+                    {
+                        "title": m.title,
+                        "url": m.url,
+                        "source": m.source,
+                        "thumbnail": m.thumbnail,
+                        "date_published": m.date_published,
+                    }
+                    for m in osint_res.matches
+                ],
+                "keyframes_searched": osint_res.keyframes_searched,
+                "patient_zero_match": {
+                    "title": osint_res.patient_zero_match.title,
+                    "url": osint_res.patient_zero_match.url,
+                    "source": osint_res.patient_zero_match.source,
+                    "date_published": osint_res.patient_zero_match.date_published,
+                } if osint_res.patient_zero_match else None,
+                "culprit_intel": osint_res.culprit_intel,
+                "skipped": osint_res.skipped,
+                "skip_reason": osint_res.skip_reason,
+            }
+        except Exception as exc:
+            logger.warning("[%s] OSINT error (non-fatal): %s", job_id, exc)
+            return {"matches": [], "keyframes_searched": 0, "patient_zero_match": None, "culprit_intel": [], "skipped": True, "skip_reason": str(exc)}
 
-        vision_data = {
-            "facial_artifact_score": vision_res.facial_artifact_score,
-            "faces_detected": vision_res.faces_detected,
-            "frames_analyzed": vision_res.frames_analyzed,
-            "skipped_reason": vision_res.skipped_reason,
-            "error": vision_res.error,
-            "frame_scores": [
-                {
-                    "frame_path": fs.frame_path,
-                    "timestamp": fs.timestamp,
-                    "face_detected": fs.face_detected,
-                    "manipulation_score": fs.manipulation_score,
-                    "gradcam_path": fs.gradcam_path,
-                }
-                for fs in vision_res.frame_scores
-            ],
-            "suspicious_frames": [
-                {
-                    "frame_path": fs.frame_path,
-                    "timestamp": fs.timestamp,
-                    "manipulation_score": fs.manipulation_score,
-                    "gradcam_path": fs.gradcam_path,
-                }
-                for fs in vision_res.suspicious_frames
-            ],
-        }
-    except Exception as exc:
-        logger.warning("[%s] Vision stage error (non-fatal): %s", job_id, exc)
-        vision_data = {
-            "facial_artifact_score": 0.0,
-            "faces_detected": 0,
-            "frames_analyzed": 0,
-            "error": str(exc),
-            "frame_scores": [],
-            "suspicious_frames": [],
-        }
+    # ── Fire all 4 stages concurrently ────────────────────────────────
+    c2pa_data, (audio_data, resemble_data), vision_data, osint_data = await asyncio.gather(
+        _run_c2pa(),
+        _run_audio(),
+        _run_vision(),
+        _run_osint(),
+    )
 
-    # ------------------------------------------------------------------ #
-    # Stage 5: OSINT — Reverse Image Search
-    # ------------------------------------------------------------------ #
-    await _update_job(job_id, status=JobStatus.OSINT)
-    logger.info("[%s] Stage 5: OSINT reverse image search", job_id)
-
-    osint_data: dict = {}
-    try:
-        osint_res = await osint_engine.run_reverse_image_search(
-            job_id=job_id,
-            keyframe_paths=proc_result.keyframe_paths,
-            api_base_url=settings.api_base_url,
-        )
-        osint_data = {
-            "matches": [
-                {
-                    "title": m.title,
-                    "url": m.url,
-                    "source": m.source,
-                    "thumbnail": m.thumbnail,
-                    "date_published": m.date_published,
-                }
-                for m in osint_res.matches
-            ],
-            "keyframes_searched": osint_res.keyframes_searched,
-            "skipped": osint_res.skipped,
-            "skip_reason": osint_res.skip_reason,
-        }
-    except Exception as exc:
-        logger.warning("[%s] OSINT stage error (non-fatal): %s", job_id, exc)
-        osint_data = {"matches": [], "keyframes_searched": 0, "skipped": True, "skip_reason": str(exc)}
+    logger.info("[%s] Parallel stages complete — moving to LLM synthesis", job_id)
 
     # ------------------------------------------------------------------ #
     # Stage 6: LLM Evidence Synthesis
@@ -262,13 +289,17 @@ async def run_pipeline(job_id: str):
 
     verdict_data: dict = {}
     try:
-        verdict_res = await osint_engine.synthesize_verdict(
-            job_id=job_id,
-            c2pa_result=c2pa_data,
-            vision_result=vision_data,
-            audio_result=audio_data,
-            osint_result=osint_data,
-            video_duration=proc_result.duration_seconds,
+        # Hard 45s deadline — if Groq hangs we still complete the job
+        verdict_res = await asyncio.wait_for(
+            osint_engine.synthesize_verdict(
+                job_id=job_id,
+                c2pa_result=c2pa_data,
+                vision_result=vision_data,
+                audio_result=audio_data,
+                osint_result=osint_data,
+                video_duration=proc_result.duration_seconds,
+            ),
+            timeout=45.0,
         )
 
         # Build timeline events from frame scores + audio segments
@@ -284,6 +315,17 @@ async def run_pipeline(job_id: str):
             "timeline_events": timeline_events,
         }
 
+    except asyncio.TimeoutError:
+        logger.error("[%s] LLM synthesis timed out after 45s — producing fallback verdict", job_id)
+        verdict_data = {
+            "authenticity_score": 50,
+            "verdict_category": "Inconclusive",
+            "summary_headline": "Analysis complete — LLM synthesis timed out.",
+            "key_findings": ["LLM synthesis exceeded 45s deadline. All other forensic data is available."],
+            "confidence_breakdown": {},
+            "c2pa_status": c2pa_data,
+            "timeline_events": _build_timeline_events(vision_data, audio_data, settings.api_base_url, job_id),
+        }
     except Exception as exc:
         logger.error("[%s] LLM synthesis error: %s", job_id, exc)
         verdict_data = {
@@ -305,6 +347,12 @@ async def run_pipeline(job_id: str):
         "audio": audio_data,
         "vision": vision_data,
         "osint": osint_data,
+        "attribution": {
+            "resemble_source": resemble_data.get("source", "Unknown"),
+            "patient_zero_date": osint_data.get("patient_zero_match", {}).get("date_published") if osint_data.get("patient_zero_match") else None,
+            "patient_zero_url": osint_data.get("patient_zero_match", {}).get("url") if osint_data.get("patient_zero_match") else None,
+            "culprit_handles": osint_data.get("culprit_intel", []),
+        },
         "video_meta": {
             "duration_seconds": proc_result.duration_seconds,
             "fps": proc_result.fps,
@@ -327,6 +375,49 @@ async def run_pipeline(job_id: str):
         verdict_data.get("verdict_category"),
         verdict_data.get("authenticity_score"),
     )
+
+    # ------------------------------------------------------------------ #
+    # Stage 7: Blockchain Attestation (non-blocking, non-fatal)          #
+    # ------------------------------------------------------------------ #
+    logger.info("[%s] Stage 7: Blockchain attestation", job_id)
+    try:
+        bc_service = BlockchainService()
+        loop = asyncio.get_event_loop()
+        bc_result = await loop.run_in_executor(
+            None,
+            lambda: bc_service.run(
+                job_id=job_id,
+                video_path=proc_result.video_path,
+                report_payload=final_result,
+                authenticity_score=int(verdict_data.get("authenticity_score", 50)),
+                verdict_category=str(verdict_data.get("verdict_category", "Inconclusive")),
+                attributed_source=str(resemble_data.get("source", "Unknown")),
+            ),
+        )
+
+        # Persist blockchain metadata to DB
+        await _update_job(
+            job_id,
+            sha256_hash=bc_result.get("sha256"),
+            perceptual_hash=bc_result.get("phash"),
+            ipfs_cid=bc_result.get("ipfs_cid"),
+            tx_hash=bc_result.get("tx_hash"),
+            on_chain_status=bc_result.get("status", "off_chain"),
+        )
+
+        # Inject blockchain data into the stored result JSON so the frontend gets it
+        final_result["blockchain"] = bc_result
+        await _update_job(job_id, result_json=json.dumps(final_result))
+
+        logger.info(
+            "[%s] Blockchain attestation: status=%s  tx=%s",
+            job_id,
+            bc_result.get("status"),
+            bc_result.get("tx_hash") or "n/a",
+        )
+
+    except Exception as bc_exc:
+        logger.warning("[%s] Blockchain attestation error (non-fatal): %s", job_id, bc_exc)
 
     # ------------------------------------------------------------------ #
     # Post-completion: Telegram notification (non-blocking, non-fatal)

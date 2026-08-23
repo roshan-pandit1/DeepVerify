@@ -60,6 +60,8 @@ class OsintMatch:
 class OsintResult:
     matches: list[OsintMatch] = field(default_factory=list)
     keyframes_searched: int = 0
+    patient_zero_match: Optional[OsintMatch] = None
+    culprit_intel: list[str] = field(default_factory=list)
     skipped: bool = False
     skip_reason: str = ""
 
@@ -160,6 +162,34 @@ def _image_to_data_uri(image_path: str) -> Optional[str]:
         return None
 
 
+def _get_public_keyframe_url(job_id: str, kf_path: str, api_base_url: str, settings) -> str:
+    """
+    Returns a publicly accessible HTTPS URL for Google Lens.
+    If Supabase is configured, uploads keyframe to Supabase Storage.
+    Otherwise falls back to api_base_url/static/...
+    """
+    if settings.supabase_enabled:
+        try:
+            from supabase import create_client
+            # Normalize Supabase base URL (remove /rest/v1 if present)
+            base_url = settings.supabase_url.rstrip("/")
+            if base_url.endswith("/rest/v1"):
+                base_url = base_url[:-8].rstrip("/")
+            supabase = create_client(base_url, settings.supabase_service_key)
+            file_name = f"{job_id}/{Path(kf_path).name}"
+            with open(kf_path, "rb") as f:
+                img_data = f.read()
+            supabase.storage.from_("keyframes").upload(file_name, img_data, file_options={"upsert": "true"})
+            public_url = supabase.storage.from_("keyframes").get_public_url(file_name)
+            logger.info("[%s] Uploaded keyframe to Supabase for public OSINT: %s", job_id, public_url)
+            return public_url
+        except Exception as exc:
+            logger.warning("[%s] Failed to upload keyframe to Supabase: %s", job_id, exc)
+
+    relative = Path(kf_path).relative_to(Path("/tmp"))
+    return f"{api_base_url}/static/{relative}"
+
+
 async def run_reverse_image_search(
     job_id: str,
     keyframe_paths: list[str],
@@ -167,7 +197,7 @@ async def run_reverse_image_search(
 ) -> OsintResult:
     """
     Run Google Lens reverse image search on the top scene keyframes.
-    keyframes are served as static files via FastAPI at {api_base_url}/static/...
+    keyframes are served as static files via FastAPI or uploaded to Supabase Storage.
     """
     settings = get_settings()
 
@@ -187,10 +217,7 @@ async def run_reverse_image_search(
 
     for kf_path in keyframes_to_search:
         # Build a publicly accessible URL for this keyframe
-        # The keyframe lives at /tmp/uploads/{job_id}/frames/frame_*.jpg
-        # FastAPI serves /tmp/uploads/* under /static/uploads/
-        relative = Path(kf_path).relative_to(Path("/tmp"))
-        public_url = f"{api_base_url}/static/{relative}"
+        public_url = _get_public_keyframe_url(job_id, kf_path, api_base_url, settings)
 
         logger.info("[%s] Reverse image search: %s", job_id, public_url)
 
@@ -244,10 +271,81 @@ async def run_reverse_image_search(
     logger.info("[%s] Reverse search: %d unique matches from %d keyframes",
                 job_id, len(unique_matches), len(keyframes_to_search))
 
+    # Temporal Backtracing to find Patient Zero
+    import dateparser
+    patient_zero_match = None
+    earliest_date = None
+    
+    for m in unique_matches:
+        if m.date_published:
+            parsed_date = dateparser.parse(m.date_published)
+            if parsed_date:
+                if earliest_date is None or parsed_date < earliest_date:
+                    earliest_date = parsed_date
+                    patient_zero_match = m
+                    
+    # Extract culprit intel from Patient Zero
+    culprit_intel = []
+    if patient_zero_match:
+        logger.info("[%s] Found Patient Zero: %s (Published: %s)", job_id, patient_zero_match.url, patient_zero_match.date_published)
+        culprit_intel = await extract_culprit_intel(job_id, patient_zero_match)
+
     return OsintResult(
         matches=unique_matches,
         keyframes_searched=len(keyframes_to_search),
+        patient_zero_match=patient_zero_match,
+        culprit_intel=culprit_intel,
     )
+
+
+async def extract_culprit_intel(job_id: str, match: OsintMatch) -> list[str]:
+    """
+    Passes the Patient Zero match to the LLM to extract usernames, handles, and channels.
+    Uses Groq as primary LLM (fast, free-tier) with a strict timeout.
+    """
+    settings = get_settings()
+    prompt = f"""Analyze the following earliest known upload ("Patient Zero") of a deepfake video.
+Extract potential usernames, channel names, or social media handles associated with this source.
+Do not invent anything. If none can be clearly extracted from the URL, title, or source string, return an empty JSON array.
+
+Title: {match.title}
+Source: {match.source}
+URL: {match.url}
+
+Respond ONLY with a JSON array of strings. No other text. Example: ["@FakeNewsChannel"]"""
+
+    loop = asyncio.get_event_loop()
+    try:
+        from groq import Groq
+        client = Groq(api_key=settings.groq_api_key)
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.chat.completions.create(
+                model="groq/compound",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                timeout=20,
+            ),
+        )
+        raw = response.choices[0].message.content or "[]"
+
+        # Clean up possible markdown fences
+        raw = raw.strip()
+        if raw.startswith("```json"):
+            raw = raw[7:]
+        if raw.startswith("```"):
+            raw = raw[3:]
+        if raw.endswith("```"):
+            raw = raw[:-3]
+
+        parsed = json.loads(raw.strip())
+        if isinstance(parsed, list):
+            return [str(p) for p in parsed]
+        return []
+
+    except Exception as exc:
+        logger.warning("[%s] Failed to extract culprit intel: %s", job_id, exc)
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +432,9 @@ async def synthesize_verdict(
     video_duration: float,
 ) -> VerdictResult:
     """
-    Send all pipeline evidence to the LLM for a structured verdict.
+    Send all pipeline evidence to Groq for a structured verdict.
+    Primary: groq/compound  |  Fallback: openai/gpt-oss-20b via Groq
+    Strict 30s timeout prevents silent hangs on quota errors.
     """
     settings = get_settings()
 
@@ -361,40 +461,49 @@ async def synthesize_verdict(
     loop = asyncio.get_event_loop()
     raw_response = ""
 
+    # Try models in order until one succeeds
+    _GROQ_MODELS = ["groq/compound", "openai/gpt-oss-20b"]
+
     try:
-        if settings.llm_provider == "openai":
-            from openai import OpenAI  # type: ignore
-            client = OpenAI(api_key=settings.openai_api_key)
-            response = await loop.run_in_executor(
-                None,
-                lambda: client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.1,
-                    response_format={"type": "json_object"},
-                ),
-            )
-            raw_response = response.choices[0].message.content or ""
+        from groq import Groq
+        client = Groq(api_key=settings.groq_api_key)
+        last_exc = None
 
-        else:  # anthropic
-            import anthropic  # type: ignore
-            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-            response = await loop.run_in_executor(
-                None,
-                lambda: client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
-                    max_tokens=1024,
-                    system=_SYNTHESIS_SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1,
-                ),
-            )
-            raw_response = response.content[0].text if response.content else ""
+        for model in _GROQ_MODELS:
+            try:
+                logger.info("[%s] LLM synthesis using model: %s", job_id, model)
+                response = await loop.run_in_executor(
+                    None,
+                    lambda m=model: client.chat.completions.create(
+                        model=m,
+                        messages=[
+                            {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.1,
+                        timeout=30,
+                    ),
+                )
+                raw_response = response.choices[0].message.content or ""
 
-        logger.info("[%s] LLM synthesis complete (%d chars)", job_id, len(raw_response))
+                # Strip markdown fences if present
+                raw_response = raw_response.strip()
+                if raw_response.startswith("```json"):
+                    raw_response = raw_response[7:]
+                if raw_response.startswith("```"):
+                    raw_response = raw_response[3:]
+                if raw_response.endswith("```"):
+                    raw_response = raw_response[:-3]
+                raw_response = raw_response.strip()
+
+                logger.info("[%s] LLM synthesis complete via %s (%d chars)", job_id, model, len(raw_response))
+                break  # success
+            except Exception as exc:
+                logger.warning("[%s] Model %s failed: %s — trying next", job_id, model, exc)
+                last_exc = exc
+                continue
+        else:
+            raise last_exc or RuntimeError("All LLM models failed")
 
         parsed = json.loads(raw_response)
         return VerdictResult(

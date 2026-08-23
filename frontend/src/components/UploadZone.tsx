@@ -253,11 +253,11 @@ export function UploadZone({ onSubmit, isLoading }: UploadZoneProps) {
           width: "100%", marginTop: "20px",
           padding: "14px", borderRadius: "var(--radius-lg)",
           border: "none", cursor: isLoading ? "not-allowed" : "pointer",
-          background: isLoading ? "var(--bg-muted)" : "linear-gradient(135deg, var(--indigo-600), #7c3aed)",
+          background: isLoading ? "var(--bg-muted)" : "linear-gradient(135deg, var(--indigo-600), #38bdf8)",
           color: isLoading ? "var(--text-muted)" : "#ffffff",
           fontFamily: "Inter, sans-serif", fontSize: "1rem", fontWeight: 700,
           letterSpacing: "0.01em", transition: "all 0.2s ease",
-          boxShadow: isLoading ? "none" : "0 4px 14px -2px rgba(99,102,241,0.5)",
+          boxShadow: isLoading ? "none" : "0 4px 14px -2px rgba(14,165,233,0.4)",
         }}
         onMouseEnter={(e) => {
           if (!isLoading) (e.target as HTMLButtonElement).style.transform = "translateY(-1px)";

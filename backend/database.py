@@ -73,6 +73,12 @@ class Job(Base):
     error_message = Column(Text, nullable=True)
     result_json = Column(Text, nullable=True)           # full verdict JSON string
     telegram_chat_id = Column(String(100), nullable=True) # chat ID of user who requested via bot
+    # ── Blockchain Provenance ────────────────────────────────────────────────
+    sha256_hash = Column(String(64),  nullable=True)  # Hex SHA-256 of raw video bytes
+    perceptual_hash = Column(String(64), nullable=True)  # imagehash pHash fingerprint
+    ipfs_cid = Column(String(100),    nullable=True)  # IPFS CID of pinned report JSON
+    tx_hash = Column(String(100),     nullable=True)  # On-chain transaction hash
+    on_chain_status = Column(String(20), nullable=True)  # "sealed" | "off_chain" | "pending"
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

@@ -1,0 +1,97 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      { "name": "_verifier", "type": "address", "internalType": "address" }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "recordAttestation",
+    "inputs": [
+      { "name": "_exactSha256",       "type": "bytes32", "internalType": "bytes32" },
+      { "name": "_perceptualHash",    "type": "string",  "internalType": "string"  },
+      { "name": "_reportIpfsCid",     "type": "string",  "internalType": "string"  },
+      { "name": "_authenticityScore", "type": "uint8",   "internalType": "uint8"   },
+      { "name": "_verdict",           "type": "uint8",   "internalType": "enum MediaProvenanceRegistry.Verdict" },
+      { "name": "_attributedSource",  "type": "string",  "internalType": "string"  }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "getRecord",
+    "inputs": [
+      { "name": "_exactSha256", "type": "bytes32", "internalType": "bytes32" }
+    ],
+    "outputs": [
+      {
+        "name": "record",
+        "type": "tuple",
+        "internalType": "struct MediaProvenanceRegistry.ForensicRecord",
+        "components": [
+          { "name": "exactSha256",       "type": "bytes32", "internalType": "bytes32" },
+          { "name": "perceptualHash",    "type": "string",  "internalType": "string"  },
+          { "name": "reportIpfsCid",     "type": "string",  "internalType": "string"  },
+          { "name": "authenticityScore", "type": "uint8",   "internalType": "uint8"   },
+          { "name": "verdict",           "type": "uint8",   "internalType": "enum MediaProvenanceRegistry.Verdict" },
+          { "name": "attributedSource",  "type": "string",  "internalType": "string"  },
+          { "name": "timestamp",         "type": "uint256", "internalType": "uint256" },
+          { "name": "verifier",          "type": "address", "internalType": "address" }
+        ]
+      },
+      { "name": "exists", "type": "bool", "internalType": "bool" }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isAttested",
+    "inputs": [
+      { "name": "_exactSha256", "type": "bytes32", "internalType": "bytes32" }
+    ],
+    "outputs": [
+      { "name": "", "type": "bool", "internalType": "bool" }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "authorisedVerifier",
+    "inputs": [],
+    "outputs": [
+      { "name": "", "type": "address", "internalType": "address" }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "MediaAttested",
+    "inputs": [
+      { "name": "exactSha256",       "type": "bytes32", "indexed": true,  "internalType": "bytes32" },
+      { "name": "ipfsCid",           "type": "string",  "indexed": false, "internalType": "string"  },
+      { "name": "authenticityScore", "type": "uint8",   "indexed": false, "internalType": "uint8"   },
+      { "name": "verdict",           "type": "uint8",   "indexed": false, "internalType": "enum MediaProvenanceRegistry.Verdict" },
+      { "name": "verifier",          "type": "address", "indexed": true,  "internalType": "address" },
+      { "name": "timestamp",         "type": "uint256", "indexed": false, "internalType": "uint256" }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "Unauthorised",
+    "inputs": [{ "name": "caller", "type": "address", "internalType": "address" }]
+  },
+  {
+    "type": "error",
+    "name": "AlreadyAttested",
+    "inputs": [{ "name": "exactSha256", "type": "bytes32", "internalType": "bytes32" }]
+  },
+  {
+    "type": "error",
+    "name": "InvalidScore",
+    "inputs": [{ "name": "score", "type": "uint8", "internalType": "uint8" }]
+  }
+]

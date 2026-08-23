@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { DeepVerifyLogo } from "../components/DeepVerifyLogo";
 import { UploadZone } from "../components/UploadZone";
 import { ProcessingStepper } from "../components/ProcessingStepper";
 import { analyzeFile, analyzeUrl, getStatus } from "../../lib/api";
@@ -69,38 +70,31 @@ export default function HomePage() {
       {/* Nav */}
       <nav style={{
         position: "sticky", top: 0, zIndex: 10,
-        background: "rgba(255,255,255,0.85)", backdropFilter: "blur(12px)",
+        background: "rgba(255, 255, 255, 0.85)", backdropFilter: "blur(12px)",
         borderBottom: "1px solid var(--border)",
         padding: "0 32px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         height: "60px",
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <div style={{
-            width: "32px", height: "32px", borderRadius: "var(--radius-md)",
-            background: "linear-gradient(135deg, var(--indigo-600), #7c3aed)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "1rem",
-          }}>
-            🔍
+        <DeepVerifyLogo />
+        <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+          <a href="/history" style={{ color: "var(--text-muted)", textDecoration: "none", fontWeight: 500, fontSize: "0.9rem" }}>
+            History
+          </a>
+          <div style={{ display: "flex", gap: "8px" }}>
+            {["C2PA", "Computer Vision", "Groq Whisper", "OSINT", "LLM Synthesis"].map((tag) => (
+              <span key={tag} style={{
+                padding: "3px 10px", borderRadius: "999px", fontSize: "0.72rem",
+                background: "var(--bg-subtle)", border: "1px solid var(--border)",
+                color: "var(--text-muted)", fontWeight: 500,
+                display: "none",
+              }}
+              className="lg-flex"
+              >
+                {tag}
+              </span>
+            ))}
           </div>
-          <span style={{ fontWeight: 800, fontSize: "1rem", color: "var(--text-primary)" }}>
-            Deep<span className="gradient-text">Verify</span>
-          </span>
-        </div>
-        <div style={{ display: "flex", gap: "8px" }}>
-          {["C2PA", "Computer Vision", "Groq Whisper", "OSINT", "LLM Synthesis"].map((tag) => (
-            <span key={tag} style={{
-              padding: "3px 10px", borderRadius: "999px", fontSize: "0.72rem",
-              background: "var(--bg-subtle)", border: "1px solid var(--border)",
-              color: "var(--text-muted)", fontWeight: 500,
-              display: "none",
-            }}
-            className="lg-flex"
-            >
-              {tag}
-            </span>
-          ))}
         </div>
       </nav>
 
@@ -111,17 +105,8 @@ export default function HomePage() {
         textAlign: "center",
       }}>
         {/* Badge */}
-        <div style={{
-          display: "inline-flex", alignItems: "center", gap: "8px",
-          padding: "6px 16px", borderRadius: "999px",
-          background: "var(--indigo-50)", border: "1px solid var(--indigo-100)",
-          marginBottom: "24px",
-        }}>
-          <span style={{
-            width: "8px", height: "8px", borderRadius: "50%",
-            background: "var(--indigo-600)", display: "inline-block",
-            animation: "pulse-dot 1.5s ease-in-out infinite",
-          }} />
+        <div className="hero-badge-container">
+          <span className="hero-badge-dot" />
           <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--indigo-600)" }}>
             Multi-Modal Forensic Engine
           </span>
@@ -136,7 +121,7 @@ export default function HomePage() {
           letterSpacing: "-0.02em",
         }}>
           Is this video{" "}
-          <span className="gradient-text">real</span>?
+          <span className="hero-gradient-text">real</span>?
         </h1>
 
         <p style={{
@@ -158,13 +143,8 @@ export default function HomePage() {
             { icon: "🔍", label: "Google Lens Reverse Search" },
             { icon: "🤖", label: "GPT-4o-mini Synthesis" },
           ].map(({ icon, label }) => (
-            <div key={label} style={{
-              display: "flex", alignItems: "center", gap: "6px",
-              padding: "7px 14px", borderRadius: "999px",
-              background: "var(--bg-surface)", border: "1px solid var(--border)",
-              fontSize: "0.8rem", fontWeight: 500, color: "var(--text-secondary)",
-            }}>
-              <span>{icon}</span>
+            <div key={label} className="hero-feature-pill">
+              <span className="hero-feature-pill-icon">{icon}</span>
               <span>{label}</span>
             </div>
           ))}
@@ -176,13 +156,7 @@ export default function HomePage() {
         maxWidth: "760px", margin: "0 auto",
         padding: "0 24px 80px",
       }}>
-        <div style={{
-          background: "var(--bg-base)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-2xl)",
-          boxShadow: "var(--shadow-xl)",
-          padding: "40px",
-        }}>
+        <div className="hero-main-card">
           {(appState === "idle" || appState === "loading") && (
             <>
               <UploadZone onSubmit={handleSubmit} isLoading={appState === "loading"} />
@@ -211,6 +185,12 @@ export default function HomePage() {
               status="failed"
               currentStep={status.stage_step}
               errorMessage={status.error_message}
+              onReset={() => {
+                setAppState("idle");
+                setJobId(null);
+                setStatus(null);
+                setSubmitError("");
+              }}
             />
           )}
 
@@ -262,7 +242,7 @@ export default function HomePage() {
                 { n: "05", title: "OSINT", desc: "Google Lens scene keyframe search", color: "var(--rose-50)", border: "var(--rose-100)" },
                 { n: "06", title: "Verdict", desc: "GPT-4o-mini synthesizes forensic report", color: "var(--indigo-50)", border: "var(--indigo-100)" },
               ].map(({ n, title, desc, color, border }) => (
-                <div key={n} style={{
+                <div key={n} className="topic-card" style={{
                   padding: "16px", borderRadius: "var(--radius-lg)",
                   background: color, border: `1px solid ${border}`,
                 }}>
@@ -273,7 +253,7 @@ export default function HomePage() {
                   }}>
                     {n}
                   </span>
-                  <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "var(--text-primary)" }}>
+                  <p className="topic-title" style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "var(--text-primary)", transition: "color 0.2s" }}>
                     {title}
                   </p>
                   <p style={{ margin: "4px 0 0", fontSize: "0.78rem", color: "var(--text-muted)" }}>

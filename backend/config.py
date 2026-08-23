@@ -16,6 +16,7 @@ import logging
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator, model_validator
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     groq_api_key: str = ""
     serpapi_api_key: str = ""
+    resemble_api_key: str = ""
 
     # ── Supabase (optional — activates cloud DB & storage) ────────────────
     supabase_url: str = ""
@@ -56,6 +58,22 @@ class Settings(BaseSettings):
     # ── Optional ML weights ───────────────────────────────────────────────
     model_weights_path: str = ""
 
+    # ── Yt-Dlp Config ─────────────────────────────────────────────────────
+    cookies_file_path: str = ""
+
+    # ── Blockchain / IPFS Provenance (all optional) ───────────────────────
+    # Polygon Amoy testnet RPC — swap to Sepolia or mainnet as needed
+    blockchain_rpc_url: str = "https://rpc-amoy.polygon.technology"
+    # Hex private key (0x-prefixed) of the hot-wallet that signs attestations
+    wallet_private_key: str = ""
+    # Address of the deployed MediaProvenanceRegistry contract
+    contract_address: str = ""
+    # Pinata credentials for IPFS pinning
+    pinata_api_key: str = ""
+    pinata_secret_api_key: str = ""
+    # Block explorer base URL (no trailing slash)
+    block_explorer_url: str = "https://amoy.polygonscan.com"
+
     # ── Limits ────────────────────────────────────────────────────────────
     max_video_size_mb: int = 500
     frame_sample_rate: int = 1
@@ -68,6 +86,16 @@ class Settings(BaseSettings):
     @property
     def telegram_enabled(self) -> bool:
         return bool(self.telegram_bot_token.strip() and self.telegram_chat_id.strip())
+
+    @property
+    def blockchain_enabled(self) -> bool:
+        """True only when both the signing key AND contract address are present."""
+        return bool(self.wallet_private_key.strip() and self.contract_address.strip())
+
+    @property
+    def pinata_enabled(self) -> bool:
+        """True when both Pinata API credentials are present."""
+        return bool(self.pinata_api_key.strip() and self.pinata_secret_api_key.strip())
 
     # ── Validators ────────────────────────────────────────────────────────
 
@@ -126,6 +154,24 @@ class Settings(BaseSettings):
                 "to enable verdict notifications."
             )
 
+        blockchain_partial = (
+            bool(self.wallet_private_key.strip()) != bool(self.contract_address.strip())
+        )
+        if blockchain_partial:
+            warnings.append(
+                "Blockchain provenance is partially configured — set BOTH WALLET_PRIVATE_KEY and "
+                "CONTRACT_ADDRESS to enable on-chain attestations. Running in off-chain mode."
+            )
+
+        pinata_partial = (
+            bool(self.pinata_api_key.strip()) != bool(self.pinata_secret_api_key.strip())
+        )
+        if pinata_partial:
+            warnings.append(
+                "Pinata is partially configured — set BOTH PINATA_API_KEY and PINATA_SECRET_API_KEY "
+                "to enable IPFS pinning. Reports will not be pinned."
+            )
+
         # ── Emit warnings ─────────────────────────────────────────────────
         if warnings:
             for w in warnings:
@@ -156,6 +202,8 @@ class Settings(BaseSettings):
         logger.info("   Database      : %s", "Supabase PostgreSQL" if "supabase" in self.database_url else "SQLite (local)")
         logger.info("   Supabase      : %s", "enabled" if self.supabase_enabled else "disabled (using local DB)")
         logger.info("   Telegram bot  : %s", "enabled" if self.telegram_enabled else "disabled")
+        logger.info("   Blockchain    : %s", "enabled (on-chain)" if self.blockchain_enabled else "disabled (off-chain mode)")
+        logger.info("   IPFS/Pinata   : %s", "enabled" if self.pinata_enabled else "disabled (no IPFS pinning)")
 
         return self
 

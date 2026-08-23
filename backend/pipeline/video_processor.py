@@ -39,6 +39,7 @@ class VideoProcessorResult:
     width: int = 0
     height: int = 0
     error: Optional[str] = None
+    error_code: Optional[str] = None
 
 
 def _job_dir(job_id: str) -> Path:
@@ -56,47 +57,70 @@ async def download_from_url(job_id: str, url: str) -> VideoProcessorResult:
     max_mb = settings.max_video_size_mb
     logger.info("[%s] Downloading URL: %s", job_id, url)
 
-    import sys
-    cmd = [
-        sys.executable, "-m", "yt_dlp",
-        "--format", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "--merge-output-format", "mp4",
-        "--output", str(output_path),
-        "--no-playlist",
-        "--max-filesize", f"{max_mb}M",
-        "--quiet",
-        "--no-warnings",
-        url,
-    ]
+    import yt_dlp
+    import json
+    
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'merge_output_format': 'mp4',
+        'outtmpl': str(output_path),
+        'noplaylist': True,
+        'max_filesize': max_mb * 1024 * 1024,
+        'quiet': True,
+        'no_warnings': True,
+        'socket_timeout': 60,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+    }
+
+    # Support cookies for authentication
+    if settings.cookies_file_path:
+        cookies_path = Path(settings.cookies_file_path)
+    else:
+        cookies_path = Path("cookies.txt")
+        
+    if cookies_path.exists():
+        logger.info("[%s] Using cookies from %s for authentication", job_id, cookies_path)
+        ydl_opts['cookiefile'] = str(cookies_path.resolve())
+
+    def _download():
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
-        if proc.returncode != 0:
-            err = stderr.decode(errors="replace")
-            logger.error("[%s] yt-dlp failed: %s", job_id, err)
+        await asyncio.to_thread(_download)
+    except yt_dlp.utils.DownloadError as exc:
+        err_str = str(exc).lower()
+        logger.warning("[%s] yt-dlp DownloadError: %s", job_id, err_str)
+        
+        # Check for private/restricted keywords
+        restricted_keywords = ["login", "registered users", "private", "follow this account", "age-restricted", "sign in"]
+        if any(kw in err_str for kw in restricted_keywords):
             return VideoProcessorResult(
-                job_id=job_id,
-                video_path="",
-                audio_path=None,
-                frames_dir="",
-                error=f"Video download failed: {err[:500]}",
+                job_id=job_id, video_path="", audio_path=None, frames_dir="",
+                error_code="PRIVATE_OR_RESTRICTED_MEDIA",
+                error="This video is from a private account or requires authentication."
             )
-    except asyncio.TimeoutError:
-        logger.error("[%s] yt-dlp timed out after 300s", job_id)
+            
         return VideoProcessorResult(
             job_id=job_id, video_path="", audio_path=None, frames_dir="",
-            error="Video download timed out (>300s). Try a shorter video.",
+            error_code="DOWNLOAD_FAILED",
+            error=f"Video download failed: {str(exc)}"
+        )
+    except Exception as exc:
+        logger.error("[%s] yt-dlp unexpected error: %s", job_id, exc)
+        return VideoProcessorResult(
+            job_id=job_id, video_path="", audio_path=None, frames_dir="",
+            error_code="DOWNLOAD_FAILED",
+            error=f"Unexpected download error: {str(exc)}"
         )
 
     if not output_path.exists():
         return VideoProcessorResult(
             job_id=job_id, video_path="", audio_path=None, frames_dir="",
-            error="yt-dlp completed but output file not found.",
+            error_code="DOWNLOAD_FAILED",
+            error="yt-dlp completed but output file not found."
         )
 
     logger.info("[%s] Download complete: %s (%.1f MB)", job_id, output_path,
@@ -130,6 +154,11 @@ async def _process_video_file(job_id: str, video_path: str) -> VideoProcessorRes
     frames_dir = dest_dir / "frames"
     frames_dir.mkdir(exist_ok=True)
 
+    # --- Compress Video ---
+    compressed_path = await _compress_video(job_id, video_path, dest_dir)
+    if compressed_path:
+        video_path = compressed_path
+    
     # --- Probe video metadata ---
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -265,3 +294,51 @@ async def _extract_audio(job_id: str, video_path: str, dest_dir: Path) -> Option
     except Exception as exc:
         logger.warning("[%s] ffmpeg error: %s", job_id, exc)
         return None
+
+async def _compress_video(job_id: str, input_path: str, dest_dir: Path) -> Optional[str]:
+    """
+    Compress the video to reduce file size significantly (480p, 15 FPS, low bitrate).
+    """
+    output_path = dest_dir / "compressed.mp4"
+    logger.info("[%s] Compressing video to save space: %s", job_id, input_path)
+    
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", input_path,
+        "-vf", "scale='min(480,iw)':-2",  # Scale width to max 480px, keep aspect ratio
+        "-r", "15",                       # Drop to 15 FPS
+        "-vcodec", "libx264",
+        "-b:v", "200k",                   # 200 kbps video bitrate
+        "-acodec", "aac",
+        "-b:a", "64k",                    # 64 kbps audio bitrate
+        str(output_path),
+    ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        
+        if proc.returncode == 0 and output_path.exists():
+            old_size = Path(input_path).stat().st_size
+            new_size = output_path.stat().st_size
+            logger.info(
+                "[%s] Video compressed successfully: %.2f MB -> %.2f KB", 
+                job_id, old_size / (1024 * 1024), new_size / 1024
+            )
+            return str(output_path)
+        else:
+            err = stderr.decode(errors="replace")
+            logger.warning("[%s] ffmpeg compression failed or output missing: %s", job_id, err[:300])
+            return None
+            
+    except asyncio.TimeoutError:
+        logger.warning("[%s] ffmpeg compression timed out after 300s", job_id)
+        return None
+    except Exception as exc:
+        logger.warning("[%s] ffmpeg compression error: %s", job_id, exc)
+        return None
+
