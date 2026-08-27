@@ -53,7 +53,7 @@ async def send_verdict_notification(
     report_url = f"{settings.frontend_url}/report/{job_id}"
 
     # Build message text (Markdown V2 escaping for special chars)
-    def esc(text: str) -> str:
+    def esc(text: object) -> str:
         """Escape MarkdownV2 special characters."""
         special = r"\_*[]()~`>#+-=|{}.!"
         return "".join(f"\\{c}" if c in special else c for c in str(text))

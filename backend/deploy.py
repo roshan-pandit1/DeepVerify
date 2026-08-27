@@ -96,7 +96,7 @@ def deploy():
     
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
     print("\nSUCCESS! Contract deployed at:")
-    print(f"CONTRACT_ADDRESS=\"{receipt.contractAddress}\"")
+    print(f"CONTRACT_ADDRESS=\"{receipt['contractAddress']}\"")
 
 if __name__ == "__main__":
     deploy()

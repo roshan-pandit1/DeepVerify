@@ -1,0 +1,64 @@
+# Content Credibility & Manipulation Detection System Configuration
+
+ensemble_weights:
+  lexicon: 0.15
+  content_model: 0.45
+  source_network: 0.40
+
+routing_thresholds:
+  human_review: 80.0
+  reduce_distribution: 50.0
+
+lexicon_categories:
+  urgency_fear:
+    description: "Manufactures imminent threat/crisis"
+    # Seed terms are illustrative examples. Populate from labeled datasets in production.
+    seed_terms:
+      - "before it's too late"
+      - "they don't want you to know"
+      - "shocking secret"
+    weight: 1.0
+
+  ingroup_outgroup:
+    description: "Us-vs-them / dehumanizing framing"
+    seed_terms:
+      - "enemy of the people"
+      - "those people"
+      - "destroying our country"
+    weight: 1.2
+
+  false_authority:
+    description: "Unverified credential claims, fake expert appeals"
+    seed_terms:
+      - "doctors hate this"
+      - "insider reveals"
+      - "secret source confirms"
+    weight: 1.0
+
+  certainty_inflation:
+    description: "Absolutist language on contested claims"
+    seed_terms:
+      - "always"
+      - "never"
+      - "100% proven"
+      - "undeniable proof"
+    weight: 0.7
+
+  urgent_cta:
+    description: "Amplification pressure tactics"
+    seed_terms:
+      - "share before deleted"
+      - "repost now"
+      - "spread this fast"
+    weight: 1.1
+
+lexicon_params:
+  cooccurrence_threshold: 3
+  cooccurrence_bonus: 0.15
+
+source_network_params:
+  weight_account_age: 0.35
+  weight_verification: 0.25
+  weight_violation_history: 0.40
+  baseline_share_velocity: 10.0  # expected shares/min for normal content
+  share_velocity_std_dev: 5.0

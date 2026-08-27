@@ -13,6 +13,12 @@ import os
 import shutil
 import uuid
 import asyncio
+
+from dotenv import load_dotenv
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+env_path = os.path.join(BASE_DIR, '.env')
+load_dotenv(dotenv_path=env_path)
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -107,11 +113,16 @@ async def analyze(
     background_tasks: BackgroundTasks,
     file: Optional[UploadFile] = File(default=None),
     source_url: Optional[str] = Form(default=None),
+    user_claim: Optional[str] = Form(default=None),
+    virality_speed: Optional[str] = Form(default=None),
 ):
     """
     Accept either:
       - A video file upload (multipart/form-data, field: file)
       - A social media URL (multipart/form-data, field: source_url)
+    Optional fields:
+      - user_claim: Caption or claim text accompanying the video
+      - virality_speed: Share velocity metric (0-100+)
 
     Returns: { "job_id": "<uuid>" }
     """
@@ -155,6 +166,8 @@ async def analyze(
             source_url=source_url,
             original_filename=original_filename,
             video_path=video_path,
+            user_claim=user_claim,
+            virality_speed=virality_speed,
         )
         session.add(job)
         await session.commit()
@@ -190,17 +203,22 @@ async def get_status(job_id: str):
         JobStatus.FAILED: {"label": "Failed", "step": -1},
     }
 
-    stage_info = STAGE_LABELS.get(job.status, {"label": "Unknown", "step": 0})
+    job_status = JobStatus(str(job.status.value if hasattr(job.status, "value") else job.status))
+    stage_info = STAGE_LABELS.get(job_status, {"label": "Unknown", "step": 0})
+    created_at = getattr(job, "created_at", None)
+    updated_at = getattr(job, "updated_at", None)
+
+    err_msg = getattr(job, "error_message", None)
 
     return {
         "job_id": job_id,
-        "status": job.status.value,
+        "status": job_status.value,
         "stage_label": stage_info["label"],
         "stage_step": stage_info["step"],
         "total_steps": 6,
-        "error_message": job.error_message,
-        "created_at": job.created_at.isoformat() if job.created_at else None,
-        "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+        "error_message": str(err_msg) if err_msg is not None else None,
+        "created_at": created_at.isoformat() if created_at is not None else None,
+        "updated_at": updated_at.isoformat() if updated_at is not None else None,
     }
 
 
@@ -216,26 +234,30 @@ async def get_report(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
 
-    if job.status == JobStatus.FAILED:
+    job_status = JobStatus(str(job.status.value if hasattr(job.status, "value") else job.status))
+
+    if job_status == JobStatus.FAILED:
+        err_msg = getattr(job, "error_message", None)
         raise HTTPException(
             status_code=422,
             detail={
                 "error": "Analysis failed",
-                "message": job.error_message or "Unknown error",
+                "message": str(err_msg) if err_msg is not None else "Unknown error",
             },
         )
 
-    if job.status != JobStatus.COMPLETE:
+    if job_status != JobStatus.COMPLETE:
         raise HTTPException(
             status_code=202,
             detail={
-                "status": job.status.value,
+                "status": job_status.value,
                 "message": "Analysis in progress. Poll /api/status/{job_id} for updates.",
             },
         )
 
+    result_json_str = str(job.result_json or "")
     try:
-        result = json.loads(job.result_json)
+        result = json.loads(result_json_str)
     except (json.JSONDecodeError, TypeError) as exc:
         raise HTTPException(
             status_code=500,
@@ -255,16 +277,19 @@ async def get_jobs(limit: int = 20):
         result = await session.execute(stmt)
         jobs = result.scalars().all()
 
-    return [
-        {
-            "job_id": j.id,
-            "status": j.status.value,
-            "source_type": j.source_type,
-            "original_filename": j.original_filename,
-            "created_at": j.created_at.isoformat() if j.created_at else None,
-        }
-        for j in jobs
-    ]
+    job_list = []
+    for j in jobs:
+        j_status = JobStatus(str(j.status.value if hasattr(j.status, "value") else j.status))
+        j_created = getattr(j, "created_at", None)
+        j_orig_name = getattr(j, "original_filename", None)
+        job_list.append({
+            "job_id": str(j.id),
+            "status": j_status.value,
+            "source_type": str(j.source_type),
+            "original_filename": str(j_orig_name) if j_orig_name is not None else None,
+            "created_at": j_created.isoformat() if j_created is not None else None,
+        })
+    return job_list
 
 
 @app.get("/health")

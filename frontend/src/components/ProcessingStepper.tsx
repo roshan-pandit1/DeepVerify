@@ -25,16 +25,24 @@ export function ProcessingStepper({ status, currentStep, errorMessage, onReset }
   const isComplete = status === "complete";
   
   let parsedError: any = null;
-  let errorMsgString = errorMessage;
+  let errorMsgString = errorMessage ?? "";
   
-  if (errorMessage && errorMessage.startsWith("{")) {
+  if (errorMessage && errorMessage.trim().startsWith("{")) {
     try {
       parsedError = JSON.parse(errorMessage);
-      errorMsgString = parsedError.message;
+      errorMsgString = parsedError.message || errorMessage;
     } catch (e) {}
   }
   
-  const isRestricted = parsedError?.error_code === "PRIVATE_OR_RESTRICTED_MEDIA";
+  const isRestricted =
+    parsedError?.error_code === "PRIVATE_OR_RESTRICTED_MEDIA" ||
+    errorMsgString.includes("PRIVATE_OR_RESTRICTED_MEDIA") ||
+    errorMsgString.toLowerCase().includes("restricted or requires login") ||
+    errorMsgString.toLowerCase().includes("private account");
+
+  const actionableHint =
+    parsedError?.actionable_hint ||
+    "Our servers cannot bypass private account walls or platform login requirements. Please download or screen-record the video directly to your device and use the file uploader.";
 
   return (
     <div style={{ width: "100%", maxWidth: "560px", margin: "0 auto" }}>
@@ -66,7 +74,7 @@ export function ProcessingStepper({ status, currentStep, errorMessage, onReset }
                     Private or Login-Gated Media Detected
                   </p>
                   <p style={{ fontSize: "0.85rem", color: "var(--amber-700)", margin: "0 0 16px" }}>
-                    {parsedError.actionable_hint || "This content is restricted by the platform to authorized followers or logged-in users."}
+                    {actionableHint}
                   </p>
                   
                   {onReset && (

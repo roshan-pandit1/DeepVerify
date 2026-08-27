@@ -1,0 +1,11 @@
+{
+  "python.defaultInterpreterPath": "/home/pang/Desktop/DeepFake/.venv/bin/python",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/backend",
+    "/home/pang/Desktop/DeepFake/backend"
+  ],
+  "python.autoComplete.extraPaths": [
+    "${workspaceFolder}/backend",
+    "/home/pang/Desktop/DeepFake/backend"
+  ]
+}

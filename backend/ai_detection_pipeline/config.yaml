@@ -1,0 +1,38 @@
+# AI-Generated Video Detection Pipeline Configuration
+
+ensemble_weights:
+  provenance: 0.35
+  pixel_forensics: 0.25
+  temporal_signals: 0.25
+  model_fingerprint: 0.15
+
+provenance_params:
+  dominance_threshold: 0.85
+  c2pa_high_confidence: 0.95
+  watermark_high_confidence: 0.90
+
+pixel_params:
+  sample_frame_interval: 30
+  fft_anomaly_threshold: 0.40
+
+confidence_bands:
+  high_ai:
+    min_score: 90
+    max_score: 100
+    verdict: "likely_ai"
+    label: "High Confidence AI-Generated (Strong agreement or verified provenance)"
+  likely_ai:
+    min_score: 60
+    max_score: 89
+    verdict: "likely_ai"
+    label: "Likely AI-Generated (Moderate synthetic evidence)"
+  inconclusive:
+    min_score: 40
+    max_score: 59
+    verdict: "inconclusive"
+    label: "Inconclusive (Signals do not conclusively favor AI vs real)"
+  likely_real:
+    min_score: 0
+    max_score: 39
+    verdict: "likely_real"
+    label: "Likely Real (Insufficient AI signal detected)"

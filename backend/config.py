@@ -11,6 +11,7 @@ Services covered:
   - Supabase (optional: cloud DB + storage)
   - Telegram Bot (optional: completion notifications)
 """
+import os
 import sys
 import logging
 from functools import lru_cache
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=("backend/.env", ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -103,14 +104,18 @@ class Settings(BaseSettings):
     @classmethod
     def validate_llm_provider(cls, v: str) -> str:
         v = v.lower().strip()
-        if v not in ("openai", "anthropic"):
+        if v not in ("openai", "anthropic", "groq"):
             raise ValueError(
-                f"LLM_PROVIDER must be 'openai' or 'anthropic', got '{v}'"
+                f"LLM_PROVIDER must be 'openai', 'anthropic', or 'groq', got '{v}'"
             )
         return v
 
     @model_validator(mode="after")
     def validate_required_keys(self) -> "Settings":
+        # Fallback check for alternative env var names (e.g., PRIVATE_KEY vs WALLET_PRIVATE_KEY)
+        if not self.wallet_private_key and os.getenv("PRIVATE_KEY"):
+            object.__setattr__(self, "wallet_private_key", os.getenv("PRIVATE_KEY", "").strip())
+
         errors: list[str] = []
         warnings: list[str] = []
 
@@ -137,6 +142,11 @@ class Settings(BaseSettings):
             errors.append(
                 "ANTHROPIC_API_KEY is missing. "
                 "Get one at https://console.anthropic.com/ — required because LLM_PROVIDER=anthropic."
+            )
+        if self.llm_provider == "groq" and not self.groq_api_key.strip():
+            errors.append(
+                "GROQ_API_KEY is missing. "
+                "Get one at https://console.groq.com/ — required because LLM_PROVIDER=groq."
             )
 
         # ── Optional: warn if partially configured ────────────────────────

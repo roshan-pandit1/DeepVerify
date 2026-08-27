@@ -11,6 +11,7 @@ import { VideoTimeline } from "../../../components/VideoTimeline";
 import { HeatmapViewer } from "../../../components/HeatmapViewer";
 import OriginTracker from "../../../components/OriginTracker";
 import { BlockchainCertificate } from "../../../components/BlockchainCertificate";
+import ThreatMatrix from "../../../components/ThreatMatrix";
 import type { Metadata } from "next";
 
 // SSR — fetch at request time
@@ -72,7 +73,7 @@ async function ReportPage({ params }: PageProps) {
     return notFound();
   }
 
-  const { verdict, audio, vision, osint, video_meta } = report;
+  const { verdict, audio, vision, osint, video_meta, temporal, visual_threat, psychological_threat, blockchain } = report;
 
   // Build video URL
   const videoUrl = video_meta.video_path
@@ -143,6 +144,13 @@ async function ReportPage({ params }: PageProps) {
         {/* Report header */}
         <div className="animate-fade-in-up" style={{ marginBottom: "24px" }}>
           <ReportHeader verdict={verdict} jobId={id} />
+        </div>
+
+        {/* Threat Matrix — 3-pillar forensic analysis */}
+        <div className="animate-fade-in-up" style={{ marginBottom: "28px", animationDelay: "0.05s" }}>
+          <ThreatMatrix
+            report={{ temporal, visual_threat, psychological_threat, blockchain }}
+          />
         </div>
 
         {/* Two-column layout */}

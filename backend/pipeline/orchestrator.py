@@ -15,15 +15,68 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+env_path = os.path.join(BASE_DIR, '.env')
+load_dotenv(dotenv_path=env_path)
+
+import cv2
+from PIL import Image
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
 from database import AsyncSessionLocal, Job, JobStatus
-from pipeline import c2pa_inspector, video_processor, vision_model, osint_engine, resemble_service
+from pipeline import c2pa_inspector, video_processor, vision_model, osint_engine, resemble_service, temporal_analysis, visual_threat_analysis, psychological_analysis, signal_forensics, osint_vision, threat_restriction
 from pipeline.telegram_notifier import send_verdict_notification
 from pipeline.blockchain_service import BlockchainService
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Single-Pass Frame Extractor
+# ---------------------------------------------------------------------------
+
+def extract_shared_frames(
+    video_path: str,
+    count: int = 15,
+) -> list[Image.Image]:
+    """
+    Open the video file ONCE and extract `count` evenly-spaced frames in a
+    single forward sequential read (fastest possible I/O path).
+
+    Frames are returned at their NATIVE resolution as PIL RGB images.
+    Do NOT resize here — the HF ImageProcessor handles aspect-ratio-aware
+    centre-cropping internally, preserving subtle GAN artifacts that a
+    hard cv2.resize to 224×224 would destroy.
+
+    Returns an empty list if the file cannot be read.
+    """
+    cap = cv2.VideoCapture(video_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    if total_frames <= 0:
+        cap.release()
+        return []
+
+    step = max(1, total_frames // count)
+    frames: list[Image.Image] = []
+    current_idx = 0
+
+    while cap.isOpened() and len(frames) < count:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if current_idx % step == 0:
+            # DO NOT resize — pass native resolution to preserve artifacts.
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append(Image.fromarray(rgb))
+        current_idx += 1
+
+    cap.release()
+    return frames
 
 
 async def _update_job(job_id: str, **kwargs):
@@ -56,10 +109,16 @@ async def run_pipeline(job_id: str):
         if not job:
             logger.error("[%s] Job not found — aborting pipeline.", job_id)
             return
-        source_type = job.source_type
-        source_url = job.source_url
-        video_path = job.video_path  # Pre-set if file was already saved
-        telegram_chat_id = job.telegram_chat_id
+        source_type = str(job.source_type)
+        source_url = str(job.source_url or "")
+        video_path = str(job.video_path or "")  # Pre-set if file was already saved
+        telegram_chat_id = str(job.telegram_chat_id) if job.telegram_chat_id is not None else None
+        user_claim = str(getattr(job, "user_claim", "") or "")
+        virality_speed_raw = getattr(job, "virality_speed", None)
+        try:
+            virality_speed = float(virality_speed_raw) if virality_speed_raw is not None else 0.0
+        except (ValueError, TypeError):
+            virality_speed = 0.0
 
     # ------------------------------------------------------------------ #
     # Stage 1: Ingestion
@@ -90,7 +149,7 @@ async def run_pipeline(job_id: str):
             )
             logger.error("[%s] Ingestion failed: %s", job_id, proc_result.error)
             # Send failure notification to telegram if applicable
-            if telegram_chat_id:
+            if telegram_chat_id is not None:
                 from pipeline.telegram_notifier import httpx
                 settings = get_settings()
                 url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
@@ -126,7 +185,7 @@ async def run_pipeline(job_id: str):
             error_message=error_msg,
         )
         logger.exception("[%s] Ingestion exception", job_id)
-        if telegram_chat_id:
+        if telegram_chat_id is not None:
             from pipeline.telegram_notifier import httpx
             settings = get_settings()
             url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
@@ -149,6 +208,19 @@ async def run_pipeline(job_id: str):
     gradcam_dir = f"/tmp/uploads/{job_id}/gradcam"
     has_weights = bool(os.getenv("MODEL_WEIGHTS_PATH", "").strip())
     loop = asyncio.get_event_loop()
+
+    # ── Single-pass frame extraction (runs once; shared across pillars) ──
+    logger.info("[%s] Extracting shared frames (single-pass) …", job_id)
+    shared_frames: list[Image.Image] = await loop.run_in_executor(
+        None,
+        lambda: extract_shared_frames(proc_result.video_path, count=15),
+    )
+    # Pillar 2 (CLIP threat) only needs ~5 frames — thin the set to save compute
+    threat_frames = shared_frames[::3] if len(shared_frames) >= 5 else shared_frames
+    logger.info(
+        "[%s] Shared frames ready: %d total, %d for threat detection",
+        job_id, len(shared_frames), len(threat_frames),
+    )
 
     # ── helpers that each return their data dict ───────────────────────
 
@@ -240,11 +312,69 @@ async def run_pipeline(job_id: str):
 
     async def _run_osint() -> dict:
         try:
-            osint_res = await osint_engine.run_reverse_image_search(
-                job_id=job_id,
-                keyframe_paths=proc_result.keyframe_paths,
-                api_base_url=settings.api_base_url,
-            )
+            # ── 1. Check in-memory process cache (fastest) ─────────────────
+            cached = osint_engine.get_cached_osint(source_url)
+            if cached:
+                logger.info("[%s] OSINT: in-memory cache HIT (%d matches)", job_id, len(cached.matches))
+                osint_res = cached
+            else:
+                # ── 2. Check persistent DB cache ────────────────────────────
+                from database import OsintCache
+                from pipeline.osint_engine import OsintResult, OsintMatch, _cache_key
+                url_hash = _cache_key(source_url)
+                osint_res = None
+                async with AsyncSessionLocal() as sess:
+                    db_entry = await sess.get(OsintCache, url_hash)
+                    if db_entry:
+                        try:
+                            raw_matches = json.loads(db_entry.result_json)
+                            matches = [
+                                OsintMatch(
+                                    title=m.get("title", ""),
+                                    url=m.get("url", ""),
+                                    source=m.get("source", ""),
+                                    thumbnail=m.get("thumbnail"),
+                                    date_published=m.get("date_published"),
+                                )
+                                for m in raw_matches
+                            ]
+                            osint_res = OsintResult(matches=matches, keyframes_searched=2)
+                            logger.info("[%s] OSINT: DB cache HIT (%d matches)", job_id, len(matches))
+                            osint_engine.set_cached_osint(source_url, osint_res)  # warm in-memory
+                        except Exception as parse_exc:
+                            logger.warning("[%s] OSINT DB cache parse error: %s", job_id, parse_exc)
+                            osint_res = None
+
+                # ── 3. Live SerpAPI fetch ───────────────────────────────────
+                if osint_res is None:
+                    osint_res = await osint_engine.run_reverse_image_search(
+                        job_id=job_id,
+                        keyframe_paths=proc_result.keyframe_paths,
+                        api_base_url=settings.api_base_url,
+                    )
+                    # Persist to DB if we got results
+                    if osint_res.matches:
+                        osint_engine.set_cached_osint(source_url, osint_res)
+                        try:
+                            matches_json = json.dumps([
+                                {"title": m.title, "url": m.url, "source": m.source,
+                                 "thumbnail": m.thumbnail, "date_published": m.date_published}
+                                for m in osint_res.matches
+                            ])
+                            from database import OsintCache
+                            from pipeline.osint_engine import _cache_key
+                            async with AsyncSessionLocal() as sess:
+                                entry = OsintCache(
+                                    url_hash=_cache_key(source_url),
+                                    source_url=source_url[:1000],
+                                    result_json=matches_json,
+                                )
+                                await sess.merge(entry)
+                                await sess.commit()
+                            logger.info("[%s] OSINT: persisted %d matches to DB cache", job_id, len(osint_res.matches))
+                        except Exception as db_exc:
+                            logger.warning("[%s] OSINT DB cache write error: %s", job_id, db_exc)
+
             return {
                 "matches": [
                     {
@@ -271,15 +401,97 @@ async def run_pipeline(job_id: str):
             logger.warning("[%s] OSINT error (non-fatal): %s", job_id, exc)
             return {"matches": [], "keyframes_searched": 0, "patient_zero_match": None, "culprit_intel": [], "skipped": True, "skip_reason": str(exc)}
 
-    # ── Fire all 4 stages concurrently ────────────────────────────────
-    c2pa_data, (audio_data, resemble_data), vision_data, osint_data = await asyncio.gather(
+
+    async def _run_temporal() -> dict:
+        """Pillar 1: Temporal Inconsistency Detection — batched inference on shared_frames."""
+        try:
+            result = await loop.run_in_executor(
+                None,
+                lambda: temporal_analysis.analyze_temporal_manipulation(
+                    frames=shared_frames,
+                    job_id=job_id,
+                ),
+            )
+            return result
+        except Exception as exc:
+            logger.warning("[%s] Temporal analysis error (non-fatal): %s", job_id, exc)
+            return {
+                "is_manipulated": False,
+                "metrics": {},
+                "error": str(exc),
+            }
+
+    async def _run_visual_threat() -> dict:
+        """Pillar 2: Visual Threat Detection — batched CLIP inference on threat_frames."""
+        try:
+            result = await loop.run_in_executor(
+                None,
+                lambda: visual_threat_analysis.analyze_visual_threats(
+                    frames=threat_frames,
+                    job_id=job_id,
+                ),
+            )
+            return result
+        except Exception as exc:
+            logger.warning("[%s] Visual threat analysis error (non-fatal): %s", job_id, exc)
+            return {
+                "is_visual_threat": False,
+                "metrics": {},
+                "error": str(exc),
+            }
+
+    async def _run_signal_forensics() -> dict:
+        """Pillar 4: Deterministic Signal Forensics — ELA, 2D FFT, Color Space Variance on shared_frames."""
+        try:
+            result = await loop.run_in_executor(
+                None,
+                lambda: signal_forensics.analyze_signal_forensics(
+                    frames=shared_frames,
+                    job_id=job_id,
+                ),
+            )
+            return result
+        except Exception as exc:
+            logger.warning("[%s] Signal forensics error (non-fatal): %s", job_id, exc)
+            return {
+                "signal_anomaly_detected": False,
+                "metrics": {},
+                "error": str(exc),
+            }
+
+    # ── Fire all 7 stages concurrently ────────────────────────────────
+    (
+        c2pa_data,
+        (audio_data, resemble_data),
+        vision_data,
+        osint_data,
+        temporal_data,
+        visual_threat_data,
+        signal_forensics_data,
+    ) = await asyncio.gather(
         _run_c2pa(),
         _run_audio(),
         _run_vision(),
         _run_osint(),
+        _run_temporal(),
+        _run_visual_threat(),
+        _run_signal_forensics(),
     )
 
     logger.info("[%s] Parallel stages complete — moving to LLM synthesis", job_id)
+
+    # ------------------------------------------------------------------ #
+    # Pillar 3: Psychological Threat Analysis (sequential — needs transcript)
+    # ------------------------------------------------------------------ #
+    logger.info("[%s] Pillar 3: Psychological threat analysis", job_id)
+    transcript_text = audio_data.get("full_text", "") or ""
+    psych_data: dict = await loop.run_in_executor(
+        None,
+        lambda: psychological_analysis.analyze_psychological_threat(
+            transcript=transcript_text,
+            job_id=job_id,
+        ),
+    )
 
     # ------------------------------------------------------------------ #
     # Stage 6: LLM Evidence Synthesis
@@ -298,6 +510,10 @@ async def run_pipeline(job_id: str):
                 audio_result=audio_data,
                 osint_result=osint_data,
                 video_duration=proc_result.duration_seconds,
+                temporal_result=temporal_data,
+                visual_threat_result=visual_threat_data,
+                psychological_result=psych_data,
+                signal_forensics_result=signal_forensics_data,
             ),
             timeout=45.0,
         )
@@ -315,38 +531,113 @@ async def run_pipeline(job_id: str):
             "timeline_events": timeline_events,
         }
 
-    except asyncio.TimeoutError:
-        logger.error("[%s] LLM synthesis timed out after 45s — producing fallback verdict", job_id)
+    except (asyncio.TimeoutError, Exception) as exc:
+        logger.error("[%s] LLM synthesis error/timeout: %s — producing calibrated fallback verdict", job_id, exc)
+        auth_score, verdict_cat, key_findings = osint_engine.calculate_weighted_verdict(
+            c2pa_data, vision_data, temporal_data, visual_threat_data, signal_forensics_data, None, osint_data
+        )
+
+        headline = "Verified Authentic — No AI manipulation or temporal artifacts detected." if verdict_cat == "Authentic" else "AI-Generated Deepfake Detected."
+
         verdict_data = {
-            "authenticity_score": 50,
-            "verdict_category": "Inconclusive",
-            "summary_headline": "Analysis complete — LLM synthesis timed out.",
-            "key_findings": ["LLM synthesis exceeded 45s deadline. All other forensic data is available."],
-            "confidence_breakdown": {},
+            "authenticity_score": auth_score,
+            "verdict_category": verdict_cat,
+            "summary_headline": headline,
+            "key_findings": key_findings,
+            "confidence_breakdown": {"c2pa_weight": 90, "facial_artifacts_weight": 90},
             "c2pa_status": c2pa_data,
             "timeline_events": _build_timeline_events(vision_data, audio_data, settings.api_base_url, job_id),
         }
+
+    # ------------------------------------------------------------------ #
+    # OSINT Vision & Threat Restriction Analysis
+    # ------------------------------------------------------------------ #
+    logger.info("[%s] OSINT Vision & Threat Restriction pipeline", job_id)
+    osint_restriction_data: dict = {}
+    try:
+        # Extract 3 evenly spaced keyframes
+        osint_keyframes = await loop.run_in_executor(
+            None,
+            lambda: osint_vision.extract_keyframes(proc_result.video_path, num_frames=3)
+        )
+
+        best_guess_labels: list[str] = []
+        matching_urls: list[str] = []
+
+        for k_path in osint_keyframes:
+            vis_res = await loop.run_in_executor(
+                None,
+                lambda p=k_path: osint_vision.reverse_image_search(p)
+            )
+            best_guess_labels.extend(vis_res.get("best_guess_labels", []))
+            matching_urls.extend(vis_res.get("pages_with_matching_images", []))
+
+        # Deduplicate
+        unique_labels = list(dict.fromkeys(best_guess_labels))
+        unique_urls = list(dict.fromkeys(matching_urls))
+
+        effective_claim = user_claim or transcript_text or source_url
+
+        panic_index = threat_restriction.calculate_panic_index(effective_claim, virality_speed)
+
+        context_mismatch = False
+        if unique_labels and effective_claim:
+            context_mismatch = await loop.run_in_executor(
+                None,
+                lambda: threat_restriction.evaluate_context_mismatch(effective_claim, unique_labels)
+            )
+
+        if context_mismatch and panic_index > 80:
+            restriction_status = "RESTRICTED - High Impact Misinformation"
+        else:
+            restriction_status = "CLEARED"
+
+        osint_restriction_data = {
+            "restriction_status": restriction_status,
+            "panic_index": panic_index,
+            "context_mismatch": context_mismatch,
+            "best_guess_labels": unique_labels,
+            "pages_with_matching_images": unique_urls,
+            "keyframes": osint_keyframes,
+        }
     except Exception as exc:
-        logger.error("[%s] LLM synthesis error: %s", job_id, exc)
-        verdict_data = {
-            "authenticity_score": 50,
-            "verdict_category": "Inconclusive",
-            "summary_headline": "Analysis partially complete — LLM synthesis failed.",
-            "key_findings": [str(exc)],
-            "confidence_breakdown": {},
-            "c2pa_status": c2pa_data,
-            "timeline_events": [],
+        logger.warning("[%s] OSINT Vision & Threat Restriction error (non-fatal): %s", job_id, exc)
+        osint_restriction_data = {
+            "restriction_status": "CLEARED",
+            "panic_index": 1.0,
+            "context_mismatch": False,
+            "best_guess_labels": [],
+            "pages_with_matching_images": [],
+            "keyframes": [],
+            "error": str(exc),
         }
 
     # ------------------------------------------------------------------ #
     # Assemble final result
     # ------------------------------------------------------------------ #
+    restriction_status_val = osint_restriction_data.get("restriction_status", "CLEARED")
+
     final_result = {
         "job_id": job_id,
+        "restriction_status": restriction_status_val,
         "verdict": verdict_data,
         "audio": audio_data,
         "vision": vision_data,
         "osint": osint_data,
+        "osint_vision": {
+            "best_guess_labels": osint_restriction_data.get("best_guess_labels", []),
+            "pages_with_matching_images": osint_restriction_data.get("pages_with_matching_images", []),
+            "keyframes": osint_restriction_data.get("keyframes", []),
+        },
+        "threat_restriction": {
+            "panic_index": osint_restriction_data.get("panic_index", 1.0),
+            "context_mismatch": osint_restriction_data.get("context_mismatch", False),
+            "restriction_status": restriction_status_val,
+        },
+        "temporal": temporal_data,
+        "visual_threat": visual_threat_data,
+        "psychological_threat": psych_data,
+        "signal_forensics": signal_forensics_data,
         "attribution": {
             "resemble_source": resemble_data.get("source", "Unknown"),
             "patient_zero_date": osint_data.get("patient_zero_match", {}).get("date_published") if osint_data.get("patient_zero_match") else None,

@@ -58,19 +58,26 @@ async def download_from_url(job_id: str, url: str) -> VideoProcessorResult:
     logger.info("[%s] Downloading URL: %s", job_id, url)
 
     import yt_dlp
+    import yt_dlp.utils  # type: ignore
     import json
-    
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    import re
+
+    ydl_opts: dict = {
+        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
         'merge_output_format': 'mp4',
         'outtmpl': str(output_path),
         'noplaylist': True,
         'max_filesize': max_mb * 1024 * 1024,
         'quiet': True,
         'no_warnings': True,
+        'no_color': True,
         'socket_timeout': 60,
+        'extractor_args': {
+            'youtube': {'player_client': ['android', 'web', 'ios']}
+        },
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
         }
     }
 
@@ -85,35 +92,49 @@ async def download_from_url(job_id: str, url: str) -> VideoProcessorResult:
         ydl_opts['cookiefile'] = str(cookies_path.resolve())
 
     def _download():
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore
             ydl.download([url])
 
     try:
         await asyncio.to_thread(_download)
     except yt_dlp.utils.DownloadError as exc:
-        err_str = str(exc).lower()
-        logger.warning("[%s] yt-dlp DownloadError: %s", job_id, err_str)
+        raw_err = str(exc)
+        clean_err = re.sub(r'\x1b\[[0-9;]*[mGKH]', '', raw_err).strip()
+        # Clean prefix like "ERROR: "
+        if clean_err.startswith("ERROR: "):
+            clean_err = clean_err[7:].strip()
         
-        # Check for private/restricted keywords
-        restricted_keywords = ["login", "registered users", "private", "follow this account", "age-restricted", "sign in"]
-        if any(kw in err_str for kw in restricted_keywords):
+        err_str_lower = clean_err.lower()
+        logger.warning("[%s] yt-dlp DownloadError: %s", job_id, clean_err)
+        
+        # Check for private/restricted/bot keywords across platforms (Instagram, YouTube, TikTok, X, etc.)
+        restricted_keywords = [
+            "login", "registered users", "private", "follow this account",
+            "age-restricted", "sign in", "certain audiences", "isn't available to everyone",
+            "is not available to everyone", "not available", "confirm you're not a bot",
+            "bot", "members-only", "requires authentication", "cookies", "login required",
+            "restricted account", "account is private", "unavailable"
+        ]
+        if any(kw in err_str_lower for kw in restricted_keywords):
             return VideoProcessorResult(
                 job_id=job_id, video_path="", audio_path=None, frames_dir="",
                 error_code="PRIVATE_OR_RESTRICTED_MEDIA",
-                error="This video is from a private account or requires authentication."
+                error=f"This video is restricted or requires login access: {clean_err}"
             )
             
         return VideoProcessorResult(
             job_id=job_id, video_path="", audio_path=None, frames_dir="",
             error_code="DOWNLOAD_FAILED",
-            error=f"Video download failed: {str(exc)}"
+            error=f"Video download failed: {clean_err}"
         )
     except Exception as exc:
-        logger.error("[%s] yt-dlp unexpected error: %s", job_id, exc)
+        raw_err = str(exc)
+        clean_err = re.sub(r'\x1b\[[0-9;]*[mGKH]', '', raw_err).strip()
+        logger.error("[%s] yt-dlp unexpected error: %s", job_id, clean_err)
         return VideoProcessorResult(
             job_id=job_id, video_path="", audio_path=None, frames_dir="",
             error_code="DOWNLOAD_FAILED",
-            error=f"Unexpected download error: {str(exc)}"
+            error=f"Unexpected download error: {clean_err}"
         )
 
     if not output_path.exists():
@@ -154,10 +175,7 @@ async def _process_video_file(job_id: str, video_path: str) -> VideoProcessorRes
     frames_dir = dest_dir / "frames"
     frames_dir.mkdir(exist_ok=True)
 
-    # --- Compress Video ---
-    compressed_path = await _compress_video(job_id, video_path, dest_dir)
-    if compressed_path:
-        video_path = compressed_path
+    # Note: Use original high-fidelity video source for frame extraction (no lossy pre-compression)
     
     # --- Probe video metadata ---
     cap = cv2.VideoCapture(video_path)

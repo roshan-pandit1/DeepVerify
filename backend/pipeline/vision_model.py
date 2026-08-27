@@ -145,7 +145,7 @@ def _run_gradcam(model, input_tensor: torch.Tensor, face_crop_np: np.ndarray,
         cam = GradCAM(model=model, target_layers=target_layers)
         targets = [ClassifierOutputTarget(1)]  # class 1 = manipulated
 
-        grayscale_cam = cam(input_tensor=input_tensor, targets=targets)
+        grayscale_cam = cam(input_tensor=input_tensor, targets=targets)  # type: ignore
 
         # Overlay on original face crop (normalized to [0,1] float RGB)
         rgb_float = cv2.cvtColor(face_crop_np, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
@@ -174,40 +174,138 @@ def _get_deepfake_detector():
     global _deepfake_detector
     if _deepfake_detector is None:
         from transformers import pipeline as hf_pipeline
-        logger.info("Loading pretrained Deepfake model from Hugging Face (dima806/deepfake_vs_real_image_detection)...")
-        _deepfake_detector = hf_pipeline("image-classification", model="dima806/deepfake_vs_real_image_detection")
+        logger.info("Loading Deepfake Vision Model (prithivMLmods/deepfake-detector-model-v1)...")
+        _deepfake_detector = hf_pipeline(
+            "image-classification",
+            model="prithivMLmods/deepfake-detector-model-v1",
+        )
     return _deepfake_detector
+
+
+def _extract_face_crop_pil(pil_img: Image.Image) -> Image.Image:
+    """Extract face bounding box crop with margin, falling back to OpenCV Haar Cascade or center crop."""
+    try:
+        mtcnn = _load_mtcnn(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        boxes, _ = mtcnn.detect(pil_img)
+        if boxes is not None and len(boxes) > 0:
+            x1, y1, x2, y2 = [max(0, int(c)) for c in boxes[0]]
+            w, h = x2 - x1, y2 - y1
+            pad_w, pad_h = int(w * 0.2), int(h * 0.2)
+            img_w, img_h = pil_img.size
+            crop_x1 = max(0, x1 - pad_w)
+            crop_y1 = max(0, y1 - pad_h)
+            crop_x2 = min(img_w, x2 + pad_w)
+            crop_y2 = min(img_h, y2 + pad_h)
+            if crop_x2 > crop_x1 and crop_y2 > crop_y1:
+                return pil_img.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+    except Exception:
+        pass
+
+    try:
+        cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        cv_faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(30, 30))
+        if len(cv_faces) > 0:
+            x, y, w, h = cv_faces[0]
+            pad_w, pad_h = int(w * 0.2), int(h * 0.2)
+            img_w, img_h = pil_img.size
+            crop_x1 = max(0, x - pad_w)
+            crop_y1 = max(0, y - pad_h)
+            crop_x2 = min(img_w, x + w + pad_w)
+            crop_y2 = min(img_h, y + h + pad_h)
+            if crop_x2 > crop_x1 and crop_y2 > crop_y1:
+                return pil_img.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+    except Exception:
+        pass
+
+    w, h = pil_img.size
+    min_dim = min(w, h)
+    left = (w - min_dim) // 2
+    top = (h - min_dim) // 2
+    return pil_img.crop((left, top, left + min_dim, top + min_dim))
 
 
 def analyze_facial_artifacts(frame_path: str) -> float:
     """
-    Analyzes a frame using a fine-tuned pretrained Deepfake AI model.
-    Returns a float between 0.0 (Authentic) and 1.0 (Deepfake).
+    Analyzes a frame's face region using the deepfake ViT classifier.
+    Returns raw manipulation probability (0.0 to 1.0).
+    Returns 0.0 if no human face is detected by MTCNN.
     """
     try:
-        detector = _get_deepfake_detector()
-        # Load image using Pillow
         img = Image.open(frame_path).convert('RGB')
+        mtcnn = _load_mtcnn(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        boxes, _ = mtcnn.detect(img)
+        if boxes is None or len(boxes) == 0:
+            return 0.0
+
+        face_crop = _extract_face_crop_pil(img)
+        detector = _get_deepfake_detector()
+        results = detector(face_crop)
         
-        # Run inference
-        results = detector(img)
-        
-        # The model returns a list of dictionaries, e.g.,
-        # [{'label': 'fake', 'score': 0.98}, {'label': 'real', 'score': 0.02}]
-        
-        fake_score = 0.0
-        
-        # Extract the confidence score for the 'fake' label
-        for result in results:
-            if result['label'].lower() == 'fake':
-                fake_score = result['score']
+        deepfake_score = 0.0
+        for item in results:
+            label = item['label'].lower()
+            if 'fake' in label or 'deepfake' in label:
+                deepfake_score = float(item['score'])
                 break
                 
-        return float(fake_score)
+        return deepfake_score
         
     except Exception as e:
         logger.error(f"Error processing frame {frame_path}: {e}")
-        return 0.0  # Default to safe on error
+        return 0.0
+
+
+def analyze_visual_authenticity(frames: list[Image.Image]) -> dict:
+    """
+    Batched visual authenticity analysis on cropped face regions.
+    """
+    if not frames:
+        return {
+            "suspicion_score": 0.05,
+            "suspicious_frames": 0,
+            "faces_detected": 0,
+            "error": None,
+        }
+
+    try:
+        detector = _get_deepfake_detector()
+        face_crops = [_extract_face_crop_pil(f) for f in frames]
+        batch_results = detector(face_crops, batch_size=len(face_crops))
+
+        raw_scores = []
+        suspicious_count = 0
+
+        for res in batch_results:
+            deepfake_score = 0.0
+            for item in res:
+                label = item["label"].lower()
+                if "fake" in label or "deepfake" in label:
+                    deepfake_score = float(item["score"])
+                    break
+
+            raw_scores.append(deepfake_score)
+            if deepfake_score > 0.45:
+                suspicious_count += 1
+
+        avg_score = float(np.mean(raw_scores)) if raw_scores else 0.05
+
+        return {
+            "suspicion_score": round(avg_score, 4),
+            "suspicious_frames": suspicious_count,
+            "faces_detected": 0,
+            "error": None,
+        }
+
+    except Exception as exc:
+        logger.error("analyze_visual_authenticity error: %s", exc)
+        return {
+            "suspicion_score": 0.05,
+            "suspicious_frames": 0,
+            "faces_detected": 0,
+            "error": str(exc),
+        }
 
 
 def analyze_video_multi_frame_average(frame_paths: list[str]) -> float:
@@ -216,7 +314,7 @@ def analyze_video_multi_frame_average(frame_paths: list[str]) -> float:
     passes all three to analyze_facial_artifacts, and returns the average score.
     """
     if not frame_paths:
-        return 0.0
+        return 0.05
     
     n = len(frame_paths)
     if n >= 3:
@@ -226,7 +324,7 @@ def analyze_video_multi_frame_average(frame_paths: list[str]) -> float:
         sampled_frames = frame_paths
 
     scores = [analyze_facial_artifacts(fp) for fp in sampled_frames]
-    return float(sum(scores) / len(scores)) if scores else 0.0
+    return sum(scores) / len(scores) if scores else 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +373,11 @@ def run_vision_pipeline(
 
         # --- Face detection ---
         try:
-            boxes, probs = mtcnn.detect(pil_img)
+            mtcnn_res = mtcnn.detect(pil_img)
+            if mtcnn_res is not None and isinstance(mtcnn_res, tuple) and len(mtcnn_res) >= 2:
+                boxes, probs = mtcnn_res[0], mtcnn_res[1]
+            else:
+                boxes, probs = None, None
         except Exception as exc:
             logger.debug("MTCNN error on frame %s: %s", frame_path, exc)
             boxes, probs = None, None
@@ -295,7 +397,7 @@ def run_vision_pipeline(
                 ))
                 continue
         else:
-            if not mtcnn_face_found:
+            if not mtcnn_face_found or boxes is None:
                 frame_scores.append(FrameScore(
                     frame_path=frame_path,
                     timestamp=timestamp,
@@ -315,13 +417,14 @@ def run_vision_pipeline(
 
             face_crop_rgb = cv2.cvtColor(face_crop_bgr, cv2.COLOR_BGR2RGB)
             pil_face = Image.fromarray(face_crop_rgb)
-            tensor = _transform(pil_face).unsqueeze(0).to(device)
+            img_tensor: torch.Tensor = _transform(pil_face)  # type: ignore
+            tensor = img_tensor.unsqueeze(0).to(device)
             with torch.no_grad():
                 logits = model(tensor)
                 probs_out = torch.softmax(logits, dim=1)
                 score = float(probs_out[0][1].item())  # class 1 = manipulated
 
-        if mtcnn_face_found:
+        if mtcnn_face_found and boxes is not None:
             total_faces += len(boxes)
         elif score > 0.0:
             total_faces += 1
@@ -331,7 +434,7 @@ def run_vision_pipeline(
         if score > 0.60:
             cam_save = os.path.join(gradcam_dir, f"gradcam_{idx:05d}_{timestamp:.2f}s.png")
             # If MTCNN found box, use it for gradcam crop, else use full frame center crop
-            if mtcnn_face_found:
+            if mtcnn_face_found and boxes is not None:
                 best_idx = int(np.argmax(probs)) if probs is not None else 0
                 box = boxes[best_idx]
                 x1, y1, x2, y2 = [max(0, int(c)) for c in box]
@@ -345,7 +448,8 @@ def run_vision_pipeline(
 
             face_crop_rgb = cv2.cvtColor(face_crop_bgr, cv2.COLOR_BGR2RGB)
             pil_face = Image.fromarray(face_crop_rgb)
-            tensor = _transform(pil_face).unsqueeze(0).to(device)
+            img_tensor: torch.Tensor = _transform(pil_face)  # type: ignore
+            tensor = img_tensor.unsqueeze(0).to(device)
             gradcam_path = _run_gradcam(model, tensor, face_crop_bgr, cam_save)
 
         frame_scores.append(FrameScore(
@@ -359,12 +463,11 @@ def run_vision_pipeline(
     # --- Aggregate score ---
     face_scores = [fs.manipulation_score for fs in frame_scores if fs.face_detected]
     if face_scores:
-        # Weighted towards worst-case (max) but tempered by mean
-        global_score = 0.6 * max(face_scores) + 0.4 * (sum(face_scores) / len(face_scores))
+        global_score = sum(face_scores) / len(face_scores)
     else:
-        global_score = 0.0
+        global_score = 0.05
 
-    suspicious = [fs for fs in frame_scores if fs.manipulation_score > 0.60]
+    suspicious = [fs for fs in frame_scores if fs.manipulation_score > 0.55]
 
     logger.info(
         "[%s] Vision complete: %d frames, %d faces, score=%.1f%%, suspicious=%d",

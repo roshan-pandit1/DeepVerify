@@ -1,0 +1,1 @@
+Welcome to Computer Science 301. Today we are exploring algorithm complexity and Big-O notation. We will analyze how execution time scales with input size n. As we observed in previous assignments, empirical benchmarking helps confirm theoretical mathematical bounds. Please review chapter 4 in your textbook before Thursday.

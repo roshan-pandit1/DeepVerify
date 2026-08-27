@@ -102,7 +102,7 @@ class BlockchainService:
                 sha256_hex=sha256_hex,
                 phash=phash_str,
                 ipfs_cid=ipfs_cid or "",
-                score=min(100, max(0, int(authenticity_score))),
+                score=min(100, max(0, authenticity_score)),
                 verdict_category=verdict_category,
                 attributed_source=attributed_source,
                 settings=settings,

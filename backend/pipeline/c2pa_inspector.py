@@ -61,7 +61,13 @@ def inspect(file_path: str) -> C2PAResult:
         return C2PAResult(status="error", message="c2pa-python not installed")
 
     try:
-        reader = c2pa.Reader.from_file(file_path)
+        # c2pa-python ≥0.6: Reader.from_file(path)
+        # c2pa-python ≥1.0: Reader(path)  (constructor-style)
+        # Try both so we handle any installed version gracefully.
+        try:
+            reader = c2pa.Reader(file_path)  # type: ignore
+        except (AttributeError, TypeError):
+            reader = c2pa.Reader.from_file(file_path)  # type: ignore
     except Exception as exc:
         exc_str = str(exc).lower()
         # Common non-fatal cases: no manifest embedded, unsupported format
