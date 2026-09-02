@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
 from database import AsyncSessionLocal, Job, JobStatus
-from pipeline import c2pa_inspector, video_processor, vision_model, osint_engine, resemble_service, temporal_analysis, visual_threat_analysis, psychological_analysis, signal_forensics, osint_vision, threat_restriction
+from pipeline import c2pa_inspector, video_processor, vision_model, osint_engine, resemble_service, temporal_analysis, visual_threat_analysis, psychological_analysis, signal_forensics, osint_vision, threat_restriction, social_context
 from pipeline.telegram_notifier import send_verdict_notification
 from pipeline.blockchain_service import BlockchainService
 
@@ -198,6 +198,48 @@ async def run_pipeline(job_id: str):
             except Exception:
                 pass
         return
+
+    # ------------------------------------------------------------------ #
+    # Stage 1.5: Pre-Triage — Social Context & Crowd OSINT Layer
+    # ------------------------------------------------------------------ #
+    logger.info("[%s] Pre-Triage: Running Social Context & Crowd Consensus Analysis", job_id)
+    crowd_analysis_data: dict = {}
+    try:
+        raw_comments = social_context.fetch_comments(source_url)
+        clean_comments = social_context.filter_bot_noise(raw_comments)
+        crowd_res = await loop.run_in_executor(
+            None,
+            lambda: social_context.analyze_crowd_consensus(clean_comments)
+        )
+        debunk_score = float(crowd_res.get("debunk_consensus", 0.5))
+        panic_idx = int(crowd_res.get("societal_panic_index", 0))
+
+        # Pre-triage routing: Priority Threat flag if crowd consensus indicates heavy debunk or panic
+        is_priority_threat = (debunk_score > 0.85 or panic_idx > 75)
+        if is_priority_threat:
+            logger.warning(
+                "[%s] PRIORITY THREAT TRIGGERED (debunk=%.2f, panic=%d) — Escalating ViT and Signal Forensics priority",
+                job_id, debunk_score, panic_idx
+            )
+
+        crowd_analysis_data = {
+            "debunk_consensus": debunk_score,
+            "societal_panic_index": panic_idx,
+            "extracted_claims": crowd_res.get("extracted_claims", []),
+            "comments_analyzed": len(clean_comments),
+            "priority_threat": is_priority_threat,
+            "error": crowd_res.get("error"),
+        }
+    except Exception as exc:
+        logger.warning("[%s] Social context pre-triage error (non-fatal): %s", job_id, exc)
+        crowd_analysis_data = {
+            "debunk_consensus": 0.5,
+            "societal_panic_index": 0,
+            "extracted_claims": [],
+            "comments_analyzed": 0,
+            "priority_threat": False,
+            "error": str(exc),
+        }
 
     # ------------------------------------------------------------------ #
     # Stages 2–5: Run C2PA, Audio, Vision, OSINT in PARALLEL
@@ -634,6 +676,7 @@ async def run_pipeline(job_id: str):
             "context_mismatch": osint_restriction_data.get("context_mismatch", False),
             "restriction_status": restriction_status_val,
         },
+        "crowd_analysis": crowd_analysis_data,
         "temporal": temporal_data,
         "visual_threat": visual_threat_data,
         "psychological_threat": psych_data,

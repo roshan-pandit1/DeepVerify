@@ -12,6 +12,7 @@ import { HeatmapViewer } from "../../../components/HeatmapViewer";
 import OriginTracker from "../../../components/OriginTracker";
 import { BlockchainCertificate } from "../../../components/BlockchainCertificate";
 import ThreatMatrix from "../../../components/ThreatMatrix";
+import { CrowdOsintRadar } from "../../../components/CrowdOsintRadar";
 import type { Metadata } from "next";
 
 // SSR — fetch at request time
@@ -149,8 +150,13 @@ async function ReportPage({ params }: PageProps) {
         {/* Threat Matrix — 3-pillar forensic analysis */}
         <div className="animate-fade-in-up" style={{ marginBottom: "28px", animationDelay: "0.05s" }}>
           <ThreatMatrix
-            report={{ temporal, visual_threat, psychological_threat, blockchain }}
+            report={{ temporal, visual_threat, psychological_threat, blockchain: blockchain ? { ...blockchain, tx_hash: blockchain.tx_hash ?? undefined } : undefined }}
           />
+        </div>
+
+        {/* Social Context & Crowd OSINT Radar */}
+        <div className="animate-fade-in-up" style={{ marginBottom: "28px", animationDelay: "0.07s" }}>
+          <CrowdOsintRadar data={report.crowd_analysis} />
         </div>
 
         {/* Two-column layout */}

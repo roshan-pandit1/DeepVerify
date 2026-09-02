@@ -149,6 +149,17 @@ export interface ReportResponse {
   osint: OsintResult;
   attribution: AttributionResult;
   video_meta: VideoMeta;
+  temporal?: Record<string, any>;
+  visual_threat?: Record<string, any>;
+  psychological_threat?: Record<string, any>;
+  crowd_analysis?: {
+    debunk_consensus: number;
+    societal_panic_index: number;
+    extracted_claims: string[];
+    comments_analyzed: number;
+    priority_threat: boolean;
+    error?: string | null;
+  };
   /** Blockchain provenance metadata — absent on jobs run before this feature was added */
   blockchain?: BlockchainResult;
 }
