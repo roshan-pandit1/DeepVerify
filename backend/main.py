@@ -100,8 +100,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve /tmp/uploads as static files at /static/uploads/<job_id>/...
-app.mount("/static", StaticFiles(directory="/tmp"), name="static")
+from middleware.error_handler import global_exception_handler
+from routes.claims import router as claims_router
+
+app.add_exception_handler(Exception, global_exception_handler)
+
+# Register v1 router
+app.include_router(claims_router, prefix="/api/v1")
+
 
 
 # ---------------------------------------------------------------------------

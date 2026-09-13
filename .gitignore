@@ -33,3 +33,4 @@ backend/backend.log
 .Trashes
 ehthumbs.db
 Thumbs.db
+.agents/

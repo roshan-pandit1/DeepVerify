@@ -1,0 +1,263 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "DeepVerify Narrative Verification API",
+    "version": "1.0.0",
+    "description": "API contracts for submitted claims, entity extraction, evidence evaluation, verification reports, and audit trails."
+  },
+  "paths": {
+    "/api/v1/claims": {
+      "post": {
+        "summary": "Submit a claim for verification",
+        "operationId": "submitClaim",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimSubmissionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Claim successfully submitted and queued for verification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid submission payload"
+          }
+        }
+      },
+      "get": {
+        "summary": "List submitted claims",
+        "operationId": "listClaims",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of claims",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ClaimResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/claims/{id}": {
+      "get": {
+        "summary": "Get claim status and details",
+        "operationId": "getClaim",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Claim details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Claim not found"
+          }
+        }
+      }
+    },
+    "/api/v1/claims/{id}/verdict": {
+      "get": {
+        "summary": "Get verification verdict and evidence report",
+        "operationId": "getClaimVerdict",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verification verdict and evidence breakdown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResultResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Verdict not found or processing incomplete"
+          }
+        }
+      }
+    },
+    "/api/v1/claims/{id}/audit-trail": {
+      "get": {
+        "summary": "Get chronological audit log for claim verification",
+        "operationId": "getClaimAuditTrail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit trail entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AuditLogEntryResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ClaimSubmissionRequest": {
+        "type": "object",
+        "required": ["raw_input", "input_type"],
+        "properties": {
+          "raw_input": {
+            "type": "string",
+            "description": "The claim text, web URL, or media reference path/metadata string (when input_type is 'media', accepts a media URL, local file path e.g. from /tmp/uploads, or metadata JSON string).",
+            "minLength": 3,
+            "maxLength": 10000,
+            "example": "Scientists in Geneva discovered a new particle that travels faster than light."
+          },
+          "input_type": {
+            "type": "string",
+            "enum": ["text", "url", "media"],
+            "example": "text"
+          }
+        }
+      },
+      "ClaimResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "c8f3b210-91a4-4a2e-b601-3f0e1c2d3a4b" },
+          "raw_input": { "type": "string" },
+          "input_type": { "type": "string" },
+          "normalized_text": { "type": "string", "nullable": true },
+          "status": { "type": "string", "example": "extracted" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ClaimDetailResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "raw_input": { "type": "string" },
+          "normalized_text": { "type": "string" },
+          "status": { "type": "string" },
+          "assertions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "assertion_text": { "type": "string" },
+                "entities": { "type": "array", "items": { "type": "string" } },
+                "confidence_weight": { "type": "number" }
+              }
+            }
+          },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "VerificationResultResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "claim_id": { "type": "string" },
+          "verdict": { "type": "string", "enum": ["Verified", "Uncertain", "Unsupported", "Contested"] },
+          "confidence_score": { "type": "number", "example": 87.5 },
+          "summary_explanation": { "type": "string" },
+          "evidence_items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "source_name": { "type": "string" },
+                "source_url": { "type": "string", "nullable": true },
+                "content_snippet": { "type": "string" },
+                "stance": { "type": "string", "enum": ["supports", "refutes", "neutral"] },
+                "credibility_score": { "type": "number" }
+              }
+            }
+          },
+          "completed_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AuditLogEntryResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "claim_id": { "type": "string" },
+          "stage_name": { "type": "string" },
+          "input_summary": { "type": "string" },
+          "output_summary": { "type": "string" },
+          "execution_time_ms": { "type": "integer" },
+          "timestamp": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}
