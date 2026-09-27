@@ -202,14 +202,16 @@ async def run_pipeline(job_id: str):
     # ------------------------------------------------------------------ #
     # Stage 1.5: Pre-Triage — Social Context & Crowd OSINT Layer
     # ------------------------------------------------------------------ #
+    # NOTE: loop is initialised HERE, before its first use in this stage.
+    loop = asyncio.get_event_loop()
     logger.info("[%s] Pre-Triage: Running Social Context & Crowd Consensus Analysis", job_id)
     crowd_analysis_data: dict = {}
     try:
         raw_comments = social_context.fetch_comments(source_url)
         clean_comments = social_context.filter_bot_noise(raw_comments)
-        crowd_res = await loop.run_in_executor(
-            None,
-            lambda: social_context.analyze_crowd_consensus(clean_comments)
+        # Use asyncio.to_thread() — cleaner than run_in_executor for sync callables.
+        crowd_res = await asyncio.to_thread(
+            social_context.analyze_crowd_consensus, clean_comments
         )
         debunk_score = float(crowd_res.get("debunk_consensus", 0.5))
         panic_idx = int(crowd_res.get("societal_panic_index", 0))
@@ -249,7 +251,7 @@ async def run_pipeline(job_id: str):
 
     gradcam_dir = f"/tmp/uploads/{job_id}/gradcam"
     has_weights = bool(os.getenv("MODEL_WEIGHTS_PATH", "").strip())
-    loop = asyncio.get_event_loop()
+    # loop was already obtained above; reuse it here.
 
     # ── Single-pass frame extraction (runs once; shared across pillars) ──
     logger.info("[%s] Extracting shared frames (single-pass) …", job_id)
@@ -354,38 +356,66 @@ async def run_pipeline(job_id: str):
 
     async def _run_osint() -> dict:
         try:
+            # Determine the stable cache identity for this job:
+            # - URL jobs  → namespaced URL hash via _cache_key()
+            # - File jobs → namespaced file-content hash via _file_cache_key()
+            is_file_job = (source_type == "file")
+            video_path_for_cache = proc_result.video_path if is_file_job else ""
+
             # ── 1. Check in-memory process cache (fastest) ─────────────────
-            cached = osint_engine.get_cached_osint(source_url)
+            if is_file_job:
+                cached = osint_engine.get_cached_osint_for_file(video_path_for_cache)
+            else:
+                cached = osint_engine.get_cached_osint(source_url)
+
             if cached:
                 logger.info("[%s] OSINT: in-memory cache HIT (%d matches)", job_id, len(cached.matches))
                 osint_res = cached
             else:
                 # ── 2. Check persistent DB cache ────────────────────────────
                 from database import OsintCache
-                from pipeline.osint_engine import OsintResult, OsintMatch, _cache_key
-                url_hash = _cache_key(source_url)
+                from pipeline.osint_engine import OsintResult, OsintMatch, _cache_key, _file_cache_key
+                # Compute the correct DB key depending on source type.
+                # File uploads use the file hash; empty-string URL keys are
+                # NEVER accepted (old entries keyed by "" are inert).
+                if is_file_job:
+                    try:
+                        db_cache_key = _file_cache_key(video_path_for_cache)
+                    except ValueError:
+                        db_cache_key = None
+                else:
+                    try:
+                        db_cache_key = _cache_key(source_url)
+                    except ValueError:
+                        db_cache_key = None
+
                 osint_res = None
-                async with AsyncSessionLocal() as sess:
-                    db_entry = await sess.get(OsintCache, url_hash)
-                    if db_entry:
-                        try:
-                            raw_matches = json.loads(db_entry.result_json)
-                            matches = [
-                                OsintMatch(
-                                    title=m.get("title", ""),
-                                    url=m.get("url", ""),
-                                    source=m.get("source", ""),
-                                    thumbnail=m.get("thumbnail"),
-                                    date_published=m.get("date_published"),
-                                )
-                                for m in raw_matches
-                            ]
-                            osint_res = OsintResult(matches=matches, keyframes_searched=2)
-                            logger.info("[%s] OSINT: DB cache HIT (%d matches)", job_id, len(matches))
-                            osint_engine.set_cached_osint(source_url, osint_res)  # warm in-memory
-                        except Exception as parse_exc:
-                            logger.warning("[%s] OSINT DB cache parse error: %s", job_id, parse_exc)
-                            osint_res = None
+                if db_cache_key is not None:
+                    async with AsyncSessionLocal() as sess:
+                        db_entry = await sess.get(OsintCache, db_cache_key)
+                        if db_entry:
+                            try:
+                                raw_matches = json.loads(db_entry.result_json)
+                                matches = [
+                                    OsintMatch(
+                                        title=m.get("title", ""),
+                                        url=m.get("url", ""),
+                                        source=m.get("source", ""),
+                                        thumbnail=m.get("thumbnail"),
+                                        date_published=m.get("date_published"),
+                                    )
+                                    for m in raw_matches
+                                ]
+                                osint_res = OsintResult(matches=matches, keyframes_searched=2)
+                                logger.info("[%s] OSINT: DB cache HIT (%d matches)", job_id, len(matches))
+                                # Warm in-memory cache with the correct namespace
+                                if is_file_job:
+                                    osint_engine.set_cached_osint_for_file(video_path_for_cache, osint_res)
+                                else:
+                                    osint_engine.set_cached_osint(source_url, osint_res)
+                            except Exception as parse_exc:
+                                logger.warning("[%s] OSINT DB cache parse error: %s", job_id, parse_exc)
+                                osint_res = None
 
                 # ── 3. Live SerpAPI fetch ───────────────────────────────────
                 if osint_res is None:
@@ -395,8 +425,11 @@ async def run_pipeline(job_id: str):
                         api_base_url=settings.api_base_url,
                     )
                     # Persist to DB if we got results
-                    if osint_res.matches:
-                        osint_engine.set_cached_osint(source_url, osint_res)
+                    if osint_res.matches and db_cache_key is not None:
+                        if is_file_job:
+                            osint_engine.set_cached_osint_for_file(video_path_for_cache, osint_res)
+                        else:
+                            osint_engine.set_cached_osint(source_url, osint_res)
                         try:
                             matches_json = json.dumps([
                                 {"title": m.title, "url": m.url, "source": m.source,
@@ -404,11 +437,10 @@ async def run_pipeline(job_id: str):
                                 for m in osint_res.matches
                             ])
                             from database import OsintCache
-                            from pipeline.osint_engine import _cache_key
                             async with AsyncSessionLocal() as sess:
                                 entry = OsintCache(
-                                    url_hash=_cache_key(source_url),
-                                    source_url=source_url[:1000],
+                                    url_hash=db_cache_key,
+                                    source_url=(source_url or video_path_for_cache)[:1000],
                                     result_json=matches_json,
                                 )
                                 await sess.merge(entry)

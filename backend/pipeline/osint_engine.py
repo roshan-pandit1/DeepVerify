@@ -9,6 +9,7 @@ Stage breakdown:
 
 All stages are independent and can gracefully skip on failure.
 """
+from __future__ import annotations
 import asyncio
 import base64
 import hashlib
@@ -29,34 +30,100 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Process-level OSINT result cache
 # ---------------------------------------------------------------------------
-# Keyed by SHA-256 of the source_url being analyzed. When SerpAPI quota is
-# exhausted or the same URL is re-analyzed, cached results are returned
-# immediately without an API call. TTL: 24 hours.
+# Keys are namespaced to prevent URL entries and file-upload entries from
+# ever colliding:
+#   URL  identity: "url:<sha256[:16] of url>"
+#   File identity: "file:<sha256[:16] of file content, computed incrementally>"
+#
+# An empty source_url (as produced by file uploads) CANNOT produce a valid
+# cache key — callers must supply the file path instead.
+# TTL: 24 hours.
 _OSINT_CACHE: dict[str, tuple[float, "OsintResult"]] = {}
 _OSINT_CACHE_TTL = 86400  # 24 hours
 
 
 def _cache_key(source_url: str) -> str:
-    return hashlib.sha256(source_url.encode()).hexdigest()[:16]
+    """URL-namespace cache key.  Raises ValueError for empty/blank URLs."""
+    if not source_url or not source_url.strip():
+        raise ValueError(
+            "_cache_key() called with an empty source_url. "
+            "Use _file_cache_key(video_path) for file uploads."
+        )
+    return "url:" + hashlib.sha256(source_url.encode()).hexdigest()[:16]
+
+
+def _file_cache_key(video_path: str) -> str:
+    """
+    File-namespace cache key based on an incremental SHA-256 digest of the
+    file at *video_path*.  Large videos are read in 1 MB chunks so the entire
+    file is never loaded into memory at once.
+    """
+    digest = hashlib.sha256()
+    try:
+        with open(video_path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise ValueError(f"Cannot hash file '{video_path}': {exc}") from exc
+    return "file:" + digest.hexdigest()[:16]
 
 
 def get_cached_osint(source_url: str) -> Optional["OsintResult"]:
-    key = _cache_key(source_url)
+    """Look up URL-based cache entry.  Returns None for empty URLs."""
+    if not source_url or not source_url.strip():
+        return None
+    try:
+        key = _cache_key(source_url)
+    except ValueError:
+        return None
     if key in _OSINT_CACHE:
         ts, result = _OSINT_CACHE[key]
         if time.time() - ts < _OSINT_CACHE_TTL and result.matches:
             logger.info("[OSINT_CACHE] HIT for %s (%d matches)", source_url[:60], len(result.matches))
             return result
-        elif key in _OSINT_CACHE:
-            del _OSINT_CACHE[key]  # expired or empty
+        del _OSINT_CACHE[key]  # expired or empty
+    return None
+
+
+def get_cached_osint_for_file(video_path: str) -> Optional["OsintResult"]:
+    """Look up file-hash-based cache entry."""
+    try:
+        key = _file_cache_key(video_path)
+    except ValueError:
+        return None
+    if key in _OSINT_CACHE:
+        ts, result = _OSINT_CACHE[key]
+        if time.time() - ts < _OSINT_CACHE_TTL and result.matches:
+            logger.info("[OSINT_CACHE] FILE-HIT for %s (%d matches)", video_path, len(result.matches))
+            return result
+        del _OSINT_CACHE[key]
     return None
 
 
 def set_cached_osint(source_url: str, result: "OsintResult") -> None:
-    if result.matches:  # only cache non-empty results
+    """Store URL-based cache entry.  Silently ignores empty URLs."""
+    if not source_url or not source_url.strip():
+        return
+    if not result.matches:
+        return
+    try:
         key = _cache_key(source_url)
-        _OSINT_CACHE[key] = (time.time(), result)
-        logger.info("[OSINT_CACHE] STORED %d matches for %s", len(result.matches), source_url[:60])
+    except ValueError:
+        return
+    _OSINT_CACHE[key] = (time.time(), result)
+    logger.info("[OSINT_CACHE] STORED %d matches for %s", len(result.matches), source_url[:60])
+
+
+def set_cached_osint_for_file(video_path: str, result: "OsintResult") -> None:
+    """Store file-hash-based cache entry."""
+    if not result.matches:
+        return
+    try:
+        key = _file_cache_key(video_path)
+    except ValueError:
+        return
+    _OSINT_CACHE[key] = (time.time(), result)
+    logger.info("[OSINT_CACHE] FILE-STORED %d matches for %s", len(result.matches), video_path)
 
 
 # ---------------------------------------------------------------------------

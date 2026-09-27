@@ -58,8 +58,20 @@ async def lifespan(app: FastAPI):
     # Validate config (will SystemExit if keys missing)
     settings = get_settings()
 
-    # Ensure temp upload directory exists
-    Path("/tmp/uploads").mkdir(parents=True, exist_ok=True)
+    # Ensure temp upload directory exists BEFORE mounting static files
+    upload_dir = Path("/tmp/uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    # Mount the upload directory so generated video/frame/Grad-CAM URLs resolve.
+    # Only the upload directory is exposed — the rest of /tmp is never served.
+    # Path traversal is mitigated by StaticFiles itself (it resolves and checks
+    # that the requested path is still within the mounted root).
+    app.mount(
+        "/static/uploads",
+        StaticFiles(directory=str(upload_dir)),
+        name="static_uploads",
+    )
+    logger.info("Mounted /static/uploads -> %s", upload_dir)
 
     # Initialize database
     await init_db()
