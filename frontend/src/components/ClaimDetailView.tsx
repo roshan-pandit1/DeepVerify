@@ -22,69 +22,118 @@ interface ClaimDetailViewProps {
 }
 
 export const ClaimDetailView: React.FC<ClaimDetailViewProps> = ({ claim }) => {
+  const isComplete = claim.status === "completed";
+
   return (
-    <div className="w-full bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg border border-indigo-500/20">
-            <FileText className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="text-lg font-semibold text-white">Claim Investigation #{claim.id.slice(0, 8)}</h3>
-            <div className="flex items-center space-x-2 text-xs text-slate-400 mt-0.5">
-              <Calendar className="w-3.5 h-3.5" />
-              <span>{new Date(claim.created_at).toLocaleString()}</span>
+    <div
+      className="card shadow-sm"
+      style={{ border: "1px solid #e5e7eb", borderRadius: 14, backgroundColor: "#ffffff" }}
+    >
+      <div className="card-body" style={{ padding: "20px 24px 24px" }}>
+        {/* Header */}
+        <div
+          className="d-flex flex-wrap align-items-center justify-content-between gap-3 pb-3 mb-3"
+          style={{ borderBottom: "1px solid #f1f5f9" }}
+        >
+          <div className="d-flex align-items-center gap-3">
+            <div
+              className="d-flex align-items-center justify-content-center rounded"
+              style={{ width: 38, height: 38, backgroundColor: "#e7f0ff" }}
+            >
+              <FileText size={17} color="#0d6efd" />
+            </div>
+            <div>
+              <h3 className="mb-0 fw-semibold" style={{ fontSize: "1rem", color: "#0f172a" }}>
+                Claim Investigation #{claim.id.slice(0, 8)}
+              </h3>
+              <div className="d-flex align-items-center gap-1 mt-1" style={{ color: "#94a3b8", fontSize: "0.75rem" }}>
+                <Calendar size={12} />
+                <span>{new Date(claim.created_at).toLocaleString()}</span>
+              </div>
             </div>
           </div>
+          <span
+            className={`badge rounded-pill ${isComplete ? "text-bg-success" : "text-bg-warning"}`}
+            style={{ fontSize: "0.72rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}
+          >
+            {claim.status}
+          </span>
         </div>
-        <span className={`px-3 py-1 text-xs font-semibold rounded-full border uppercase tracking-wider ${
-          claim.status === "completed" ? "bg-emerald-950/60 text-emerald-400 border-emerald-800/60" : "bg-amber-950/60 text-amber-400 border-amber-800/60 animate-pulse"
-        }`}>
-          {claim.status}
-        </span>
-      </div>
 
-      <div>
-        <h4 className="text-xs uppercase font-bold tracking-wider text-slate-400 mb-2">Original Submission</h4>
-        <p className="bg-slate-950/80 p-4 rounded-xl text-slate-200 text-sm border border-slate-850 leading-relaxed font-mono">
-          {claim.raw_input}
-        </p>
-      </div>
-
-      {claim.normalized_text && (
-        <div>
-          <h4 className="text-xs uppercase font-bold tracking-wider text-slate-400 mb-2">Normalized Claim Unit</h4>
-          <p className="bg-slate-950/80 p-4 rounded-xl text-slate-300 text-sm border border-slate-850 leading-relaxed">
-            {claim.normalized_text}
+        {/* Original submission */}
+        <div className="mb-3">
+          <p
+            className="mb-1 fw-semibold text-uppercase"
+            style={{ fontSize: "0.7rem", color: "#94a3b8", letterSpacing: "0.06em" }}
+          >
+            Original Submission
           </p>
-        </div>
-      )}
-
-      {claim.assertions && claim.assertions.length > 0 && (
-        <div>
-          <h4 className="text-xs uppercase font-bold tracking-wider text-slate-400 mb-3">Extracted Sub-Assertions & Entities</h4>
-          <div className="space-y-3">
-            {claim.assertions.map((a, i) => (
-              <div key={a.id || i} className="bg-slate-950/50 p-4 rounded-xl border border-slate-800 space-y-2">
-                <div className="flex items-start space-x-2">
-                  <CheckCircle2 className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
-                  <span className="text-sm text-white font-medium">{a.assertion_text}</span>
-                </div>
-                {a.entities && a.entities.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                    <Tag className="w-3.5 h-3.5 text-slate-400" />
-                    {a.entities.map((e, idx) => (
-                      <span key={idx} className="bg-blue-950/60 text-blue-300 border border-blue-800/40 text-[11px] px-2 py-0.5 rounded-md font-medium">
-                        {e}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
+          <div
+            className="p-3 rounded"
+            style={{ backgroundColor: "#f8f9fa", border: "1px solid #e5e7eb", fontSize: "0.875rem", color: "#334155", fontFamily: "monospace", lineHeight: 1.6 }}
+          >
+            {claim.raw_input}
           </div>
         </div>
-      )}
+
+        {/* Normalized text */}
+        {claim.normalized_text && (
+          <div className="mb-3">
+            <p
+              className="mb-1 fw-semibold text-uppercase"
+              style={{ fontSize: "0.7rem", color: "#94a3b8", letterSpacing: "0.06em" }}
+            >
+              Normalized Claim Unit
+            </p>
+            <div
+              className="p-3 rounded"
+              style={{ backgroundColor: "#f8f9fa", border: "1px solid #e5e7eb", fontSize: "0.875rem", color: "#334155", lineHeight: 1.6 }}
+            >
+              {claim.normalized_text}
+            </div>
+          </div>
+        )}
+
+        {/* Assertions */}
+        {claim.assertions && claim.assertions.length > 0 && (
+          <div>
+            <p
+              className="mb-2 fw-semibold text-uppercase"
+              style={{ fontSize: "0.7rem", color: "#94a3b8", letterSpacing: "0.06em" }}
+            >
+              Extracted Sub-Assertions &amp; Entities
+            </p>
+            <div className="d-flex flex-column gap-2">
+              {claim.assertions.map((a, i) => (
+                <div
+                  key={a.id || i}
+                  className="p-3 rounded"
+                  style={{ backgroundColor: "#f8f9fa", border: "1px solid #e5e7eb" }}
+                >
+                  <div className="d-flex align-items-start gap-2 mb-2">
+                    <CheckCircle2 size={15} color="#0d6efd" style={{ marginTop: 2, flexShrink: 0 }} />
+                    <span style={{ fontSize: "0.875rem", color: "#0f172a", fontWeight: 500 }}>{a.assertion_text}</span>
+                  </div>
+                  {a.entities && a.entities.length > 0 && (
+                    <div className="d-flex flex-wrap align-items-center gap-1" style={{ paddingLeft: 23 }}>
+                      <Tag size={12} color="#94a3b8" />
+                      {a.entities.map((e, idx) => (
+                        <span
+                          key={idx}
+                          className="badge"
+                          style={{ backgroundColor: "#e7f0ff", color: "#0d6efd", fontWeight: 500, fontSize: "0.7rem" }}
+                        >
+                          {e}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

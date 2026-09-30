@@ -13,7 +13,7 @@ asyncpg==0.30.0
 supabase
 
 # Pipeline: C2PA
-c2pa-python==0.37.7
+c2pa-python==0.9.0
 
 # Pipeline: Video / Audio
 yt-dlp

@@ -18,55 +18,119 @@ interface AuditTrailViewerProps {
 }
 
 export const AuditTrailViewer: React.FC<AuditTrailViewerProps> = ({ entries }) => {
-  if (!entries || entries.length === 0) {
-    return null;
-  }
+  if (!entries || entries.length === 0) return null;
 
   return (
-    <div className="w-full bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-6">
-      <div className="flex items-center space-x-3 pb-4 border-b border-slate-800">
-        <div className="p-2 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30">
-          <History className="w-5 h-5" />
-        </div>
-        <div>
-          <h3 className="text-lg font-bold text-white tracking-wide">Verification Audit Trail</h3>
-          <p className="text-xs text-slate-400">Step-by-step immutable execution logs and timing metrics</p>
-        </div>
-      </div>
-
-      <div className="relative pl-6 space-y-6 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-800">
-        {entries.map((entry, index) => (
-          <div key={entry.id || index} className="relative group">
-            <div className="absolute -left-6 top-1.5 w-3 h-3 rounded-full bg-blue-500 border-2 border-slate-900 group-hover:scale-125 transition-transform" />
-
-            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2 hover:border-slate-700 transition-colors">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center space-x-2">
-                  <Activity className="w-4 h-4 text-blue-400" />
-                  <span className="text-xs font-bold text-white tracking-wider uppercase">{entry.stage_name}</span>
-                </div>
-                <div className="flex items-center space-x-3 text-[11px] text-slate-400">
-                  <div className="flex items-center space-x-1">
-                    <Clock className="w-3 h-3 text-slate-500" />
-                    <span>{entry.execution_time_ms} ms</span>
-                  </div>
-                  <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-2 border-t border-slate-900/60 text-xs">
-                <div>
-                  <span className="text-slate-500 font-semibold uppercase text-[10px] block">Stage Input</span>
-                  <p className="text-slate-300 font-mono mt-0.5">{entry.input_summary}</p>
-                </div>
-                <div>
-                  <span className="text-slate-500 font-semibold uppercase text-[10px] block">Stage Output</span>
-                  <p className="text-slate-300 font-mono mt-0.5">{entry.output_summary}</p>
-                </div>
-              </div>
-            </div>
+    <div
+      className="card shadow-sm"
+      style={{ border: "1px solid #e5e7eb", borderRadius: 14, backgroundColor: "#ffffff" }}
+    >
+      <div className="card-body" style={{ padding: "20px 24px 24px" }}>
+        {/* Header */}
+        <div
+          className="d-flex align-items-center gap-3 pb-3 mb-3"
+          style={{ borderBottom: "1px solid #f1f5f9" }}
+        >
+          <div
+            className="d-flex align-items-center justify-content-center rounded"
+            style={{ width: 38, height: 38, backgroundColor: "#e7f0ff" }}
+          >
+            <History size={17} color="#0d6efd" />
           </div>
-        ))}
+          <div>
+            <h3 className="mb-0 fw-bold" style={{ fontSize: "1rem", color: "#0f172a" }}>
+              Verification Audit Trail
+            </h3>
+            <p className="mb-0" style={{ fontSize: "0.76rem", color: "#64748b" }}>
+              Step-by-step immutable execution logs and timing metrics
+            </p>
+          </div>
+        </div>
+
+        {/* Timeline */}
+        <div style={{ position: "relative", paddingLeft: 24 }}>
+          {/* Vertical line */}
+          <div
+            style={{
+              position: "absolute",
+              left: 8,
+              top: 8,
+              bottom: 8,
+              width: 2,
+              backgroundColor: "#e5e7eb",
+            }}
+          />
+
+          <div className="d-flex flex-column gap-3">
+            {entries.map((entry, index) => (
+              <div key={entry.id || index} style={{ position: "relative" }}>
+                {/* Dot */}
+                <div
+                  style={{
+                    position: "absolute",
+                    left: -20,
+                    top: 14,
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    backgroundColor: "#0d6efd",
+                    border: "2px solid #ffffff",
+                    boxShadow: "0 0 0 2px #0d6efd",
+                  }}
+                />
+
+                <div
+                  className="p-3 rounded"
+                  style={{ backgroundColor: "#f8f9fa", border: "1px solid #e5e7eb" }}
+                >
+                  <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                    <div className="d-flex align-items-center gap-2">
+                      <Activity size={14} color="#0d6efd" />
+                      <span
+                        className="fw-bold text-uppercase"
+                        style={{ fontSize: "0.75rem", color: "#0f172a", letterSpacing: "0.06em" }}
+                      >
+                        {entry.stage_name}
+                      </span>
+                    </div>
+                    <div className="d-flex align-items-center gap-3" style={{ fontSize: "0.72rem", color: "#94a3b8" }}>
+                      <div className="d-flex align-items-center gap-1">
+                        <Clock size={11} />
+                        <span>{entry.execution_time_ms} ms</span>
+                      </div>
+                      <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                  </div>
+
+                  <div className="row g-2" style={{ fontSize: "0.78rem" }}>
+                    <div className="col-12 col-md-6">
+                      <p
+                        className="mb-1 fw-semibold text-uppercase"
+                        style={{ fontSize: "0.65rem", color: "#94a3b8", letterSpacing: "0.06em" }}
+                      >
+                        Stage Input
+                      </p>
+                      <p className="mb-0" style={{ color: "#334155", fontFamily: "monospace" }}>
+                        {entry.input_summary}
+                      </p>
+                    </div>
+                    <div className="col-12 col-md-6">
+                      <p
+                        className="mb-1 fw-semibold text-uppercase"
+                        style={{ fontSize: "0.65rem", color: "#94a3b8", letterSpacing: "0.06em" }}
+                      >
+                        Stage Output
+                      </p>
+                      <p className="mb-0" style={{ color: "#334155", fontFamily: "monospace" }}>
+                        {entry.output_summary}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

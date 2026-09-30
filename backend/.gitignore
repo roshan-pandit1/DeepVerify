@@ -1,7 +1,9 @@
 # Environments
+.env.example
 .env
 venv/
 env/
+
 
 # Python
 __pycache__/
@@ -32,3 +34,6 @@ __pycache__/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+
+

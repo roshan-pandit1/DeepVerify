@@ -26,113 +26,154 @@ interface VerdictCardProps {
   report: VerdictReport;
 }
 
-export const VerdictCard: React.FC<VerdictCardProps> = ({ report }) => {
-  const getBadgeStyle = (verdict: string) => {
-    switch (verdict) {
-      case "Verified":
-        return {
-          icon: <ShieldCheck className="w-6 h-6 text-emerald-400" />,
-          bg: "bg-emerald-950/80 border-emerald-800/80 text-emerald-300",
-          barBg: "bg-emerald-500",
-        };
-      case "Unsupported":
-        return {
-          icon: <XCircle className="w-6 h-6 text-rose-400" />,
-          bg: "bg-rose-950/80 border-rose-800/80 text-rose-300",
-          barBg: "bg-rose-500",
-        };
-      case "Contested":
-        return {
-          icon: <AlertTriangle className="w-6 h-6 text-amber-400" />,
-          bg: "bg-amber-950/80 border-amber-800/80 text-amber-300",
-          barBg: "bg-amber-500",
-        };
-      default:
-        return {
-          icon: <HelpCircle className="w-6 h-6 text-slate-400" />,
-          bg: "bg-slate-900/80 border-slate-800/80 text-slate-300",
-          barBg: "bg-blue-500",
-        };
-    }
-  };
+const verdictConfig = {
+  Verified: {
+    icon: <ShieldCheck size={22} color="#198754" />,
+    alertClass: "alert-success",
+    barColor: "#198754",
+    badgeClass: "text-bg-success",
+  },
+  Unsupported: {
+    icon: <XCircle size={22} color="#dc3545" />,
+    alertClass: "alert-danger",
+    barColor: "#dc3545",
+    badgeClass: "text-bg-danger",
+  },
+  Contested: {
+    icon: <AlertTriangle size={22} color="#ffc107" />,
+    alertClass: "alert-warning",
+    barColor: "#ffc107",
+    badgeClass: "text-bg-warning",
+  },
+  Uncertain: {
+    icon: <HelpCircle size={22} color="#0d6efd" />,
+    alertClass: "alert-primary",
+    barColor: "#0d6efd",
+    badgeClass: "text-bg-primary",
+  },
+};
 
-  const style = getBadgeStyle(report.verdict);
+const stanceBadge = (stance: string) => {
+  if (stance === "supports") return { bg: "#d1fae5", color: "#065f46", label: "Supports" };
+  if (stance === "refutes") return { bg: "#fee2e2", color: "#991b1b", label: "Refutes" };
+  return { bg: "#f1f5f9", color: "#475569", label: "Neutral" };
+};
+
+export const VerdictCard: React.FC<VerdictCardProps> = ({ report }) => {
+  const cfg = verdictConfig[report.verdict] ?? verdictConfig.Uncertain;
 
   return (
-    <div className="w-full space-y-6">
-      {/* Verdict Summary Card */}
-      <div className={`p-6 rounded-2xl border backdrop-blur-md shadow-2xl space-y-5 ${style.bg}`}>
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center space-x-3">
-            <div className="p-2.5 bg-slate-950/60 rounded-xl border border-slate-800">
-              {style.icon}
+    <div className="d-flex flex-column gap-3">
+      {/* Verdict Summary */}
+      <div
+        className={`alert ${cfg.alertClass} shadow-sm`}
+        role="alert"
+        style={{ borderRadius: 14, border: "1px solid", padding: "1.25rem" }}
+      >
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
+          <div className="d-flex align-items-center gap-3">
+            <div
+              className="d-flex align-items-center justify-content-center rounded"
+              style={{ width: 42, height: 42, backgroundColor: "rgba(255,255,255,0.7)", border: "1px solid rgba(0,0,0,0.08)" }}
+            >
+              {cfg.icon}
             </div>
             <div>
-              <div className="text-xs uppercase font-bold tracking-widest opacity-75">Verification Classification</div>
-              <h3 className="text-2xl font-black tracking-wide text-white">{report.verdict}</h3>
+              <p className="mb-0" style={{ fontSize: "0.68rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.7 }}>
+                Verification Classification
+              </p>
+              <h3 className="mb-0 fw-black" style={{ fontSize: "1.4rem" }}>
+                {report.verdict}
+              </h3>
             </div>
           </div>
-          <div className="text-right">
-            <div className="text-xs uppercase font-bold tracking-widest opacity-75">Confidence Index</div>
-            <div className="text-2xl font-black text-white">{report.confidence_score}%</div>
+          <div className="text-end">
+            <p className="mb-0" style={{ fontSize: "0.68rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.7 }}>
+              Confidence Index
+            </p>
+            <div className="fw-black" style={{ fontSize: "1.5rem" }}>{report.confidence_score}%</div>
           </div>
         </div>
 
-        {/* Progress meter */}
-        <div className="w-full bg-slate-950/80 h-2.5 rounded-full overflow-hidden p-0.5 border border-slate-800">
+        {/* Progress bar */}
+        <div className="progress mb-3" style={{ height: 8, borderRadius: 99, backgroundColor: "rgba(255,255,255,0.5)" }}>
           <div
-            className={`h-full rounded-full transition-all duration-700 ${style.barBg}`}
-            style={{ width: `${report.confidence_score}%` }}
+            className="progress-bar"
+            role="progressbar"
+            style={{ width: `${report.confidence_score}%`, backgroundColor: cfg.barColor, borderRadius: 99, transition: "width 0.7s ease" }}
           />
         </div>
 
-        <p className="text-sm text-slate-200 leading-relaxed bg-slate-950/40 p-4 rounded-xl border border-slate-800/40 font-medium">
+        <p style={{ fontSize: "0.875rem", marginBottom: 0, lineHeight: 1.65 }}>
           {report.summary_explanation}
         </p>
       </div>
 
-      {/* Evidence Sources Breakdown */}
+      {/* Evidence sources */}
       {report.evidence_items && report.evidence_items.length > 0 && (
-        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-4">
-          <h4 className="text-sm uppercase font-bold tracking-wider text-slate-400 flex items-center space-x-2">
-            <Award className="w-4 h-4 text-blue-400" />
-            <span>Corroborating OSINT & Source Evidence ({report.evidence_items.length})</span>
-          </h4>
+        <div
+          className="card shadow-sm"
+          style={{ border: "1px solid #e5e7eb", borderRadius: 14, backgroundColor: "#ffffff" }}
+        >
+          <div className="card-body" style={{ padding: "20px 24px 24px" }}>
+            <h4
+              className="d-flex align-items-center gap-2 mb-3 fw-semibold"
+              style={{ fontSize: "0.82rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "#64748b" }}
+            >
+              <Award size={15} color="#0d6efd" />
+              Corroborating OSINT &amp; Source Evidence ({report.evidence_items.length})
+            </h4>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {report.evidence_items.map((ev) => (
-              <div key={ev.id} className="bg-slate-950/70 p-4 rounded-xl border border-slate-850 flex flex-col justify-between space-y-3">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-blue-400 tracking-wide uppercase">{ev.source_name}</span>
-                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border ${
-                      ev.stance === "supports" ? "bg-emerald-950/70 text-emerald-300 border-emerald-800/60" :
-                      ev.stance === "refutes" ? "bg-rose-950/70 text-rose-300 border-rose-800/60" : "bg-slate-800 text-slate-300 border-slate-700"
-                    }`}>
-                      {ev.stance}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-300 italic line-clamp-3 leading-relaxed">
-                    "{ev.content_snippet}"
-                  </p>
-                </div>
-
-                <div className="pt-2 border-t border-slate-900 flex items-center justify-between text-[11px] text-slate-400">
-                  <span>Credibility: <strong className="text-white">{(ev.credibility_score * 100).toFixed(0)}%</strong></span>
-                  {ev.source_url && (
-                    <a
-                      href={ev.source_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center space-x-1 text-blue-400 hover:text-blue-300 transition-colors"
+            <div className="row g-3">
+              {report.evidence_items.map((ev) => {
+                const sb = stanceBadge(ev.stance);
+                return (
+                  <div key={ev.id} className="col-12 col-md-6">
+                    <div
+                      className="h-100 p-3 rounded d-flex flex-column justify-content-between gap-2"
+                      style={{ backgroundColor: "#f8f9fa", border: "1px solid #e5e7eb" }}
                     >
-                      <span>Source</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
-                </div>
-              </div>
-            ))}
+                      <div>
+                        <div className="d-flex align-items-center justify-content-between mb-2">
+                          <span className="fw-bold" style={{ fontSize: "0.75rem", color: "#0d6efd", textTransform: "uppercase" }}>
+                            {ev.source_name}
+                          </span>
+                          <span
+                            className="badge"
+                            style={{ backgroundColor: sb.bg, color: sb.color, fontSize: "0.65rem", fontWeight: 700, textTransform: "uppercase" }}
+                          >
+                            {sb.label}
+                          </span>
+                        </div>
+                        <p className="mb-0 fst-italic" style={{ fontSize: "0.8rem", color: "#475569", lineHeight: 1.55, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                          &ldquo;{ev.content_snippet}&rdquo;
+                        </p>
+                      </div>
+                      <div
+                        className="d-flex align-items-center justify-content-between pt-2"
+                        style={{ borderTop: "1px solid #e5e7eb", fontSize: "0.75rem", color: "#94a3b8" }}
+                      >
+                        <span>
+                          Credibility:{" "}
+                          <strong style={{ color: "#0f172a" }}>{(ev.credibility_score * 100).toFixed(0)}%</strong>
+                        </span>
+                        {ev.source_url && (
+                          <a
+                            href={ev.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-outline-primary btn-sm py-0 d-flex align-items-center gap-1"
+                            style={{ fontSize: "0.72rem" }}
+                          >
+                            Source <ExternalLink size={11} />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
