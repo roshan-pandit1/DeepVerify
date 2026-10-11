@@ -34,3 +34,8 @@ backend/backend.log
 ehthumbs.db
 Thumbs.db
 .agents/
+.venv/
+.pytest_cache/
+backend/investigation-data/
+*.cookies.txt
+frontend/.env.production.local
