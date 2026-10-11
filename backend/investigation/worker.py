@@ -83,7 +83,8 @@ def run_once():
             with connect() as db:
                 if not owned(db, claim_id, owner):
                     return True
-                db.execute("UPDATE searches SET state='failed', error=?, retrieved_at=? WHERE id=?", (error, now(), search_id))
+                state = 'unavailable' if isinstance(exc, retrieval.Unavailable) else 'failed'
+                db.execute('UPDATE searches SET state=?, error=?, retrieved_at=? WHERE id=?', (state, error, now(), search_id))
                 audit(db, claim_id, 'retrieval failure', error)
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
@@ -96,6 +97,7 @@ def run_once():
         db.execute("UPDATE claims SET status='COMPLETED', updated_at=? WHERE id=?", (now(), claim_id))
         db.execute("UPDATE investigation_jobs SET state='done', lease_until=0 WHERE claim_id=?", (claim_id,))
         update_assessments(db, claim_id)
+        audit(db, claim_id, 'assessment', 'Assertion-level sufficiency assessed separately from relevance ranking and source stance.')
         audit(db, claim_id, 'memory updated', 'lexical-jaccard-v1; stored assertions, searches, evidence and assessments. No model training.')
     return True
 

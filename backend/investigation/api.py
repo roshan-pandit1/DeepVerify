@@ -59,7 +59,7 @@ class Edits(BaseModel):
 
 
 class Feedback(BaseModel):
-    reviewer: str = Field(min_length=8, max_length=100)
+    reviewer: str = Field(min_length=8, max_length=100, pattern=r'^[A-Za-z0-9._:-]+$')
     dimension: Literal['relevance', 'stance']
     label: str
 
@@ -189,5 +189,5 @@ def learning():
         effective = score([0, 0, 0, 1, 1], active)[1]
         count = len(eligible_data(db))
         return {'active_ranker': active, 'effective_ranker': effective, 'approved_live_examples': count,
-                'status': 'collecting reviewed feedback' if active == 'baseline-v1' else 'reviewed candidate active',
+                'status': 'collecting reviewed feedback' if effective.startswith('baseline-v1') else 'reviewed candidate active',
                 'memory': LexicalMemory.version, 'training': 'Batch only; searches update memory, not model weights.'}

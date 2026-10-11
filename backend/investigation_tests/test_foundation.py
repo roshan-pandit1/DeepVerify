@@ -1,6 +1,8 @@
 import json
 import sqlite3
 import time
+import subprocess
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -58,6 +60,7 @@ def test_mixed_dns_blocked(monkeypatch):
 def test_unavailable_and_retry(client):
     item = finished(client, provider='serpapi')
     assert item['stage'] == 'partial'
+    assert item['searches'][0]['state'] == 'unavailable'
     assert 'SERPAPI_API_KEY' in item['searches'][0]['error']
     assert item['assertions'][0]['assessment'] == 'insufficient evidence'
     assert item['assertions'][0]['evidence'] == []
@@ -149,6 +152,64 @@ def test_memory_and_baseline(client):
     assert score([1, 1, 1, 0, 1])[0] == pytest.approx(1)
     assert score([1, 0, 0, 1, 1], 'candidate-missing')[0] == baseline([1, 0, 0, 1, 1])
     assert client.get('/api/learning').json()['status'] == 'collecting reviewed feedback'
+
+
+def test_actual_worker_process_restart(client):
+    item = create(client)
+    client.post(f"/api/investigations/{item['claim_id']}/run")
+    killed = subprocess.run([sys.executable, '-c', 'from investigation.worker import reserve; import os; reserve(); os._exit(9)'])
+    assert killed.returncode == 9
+    with connect() as db:
+        assert db.execute('SELECT state FROM investigation_jobs').fetchone()[0] == 'running'
+        db.execute('UPDATE investigation_jobs SET lease_until=0')
+    restarted = subprocess.run([sys.executable, '-m', 'investigation.worker', '--once'], capture_output=True)
+    assert restarted.returncode == 0, restarted.stderr
+    report = client.get(f"/api/investigations/{item['claim_id']}").json()
+    assert report['stage'] == 'complete'
+    assert report['job']['attempts'] == 2
+
+
+def test_worker_retains_partial_results_after_interruption(client, monkeypatch):
+    item = create(client, 'Aurora opened in Oslo in 2024. Mercury has no moons.')
+    client.post(f"/api/investigations/{item['claim_id']}/run")
+    original = retrieval.Offline.search
+    calls = []
+    def interrupted(self, query):
+        calls.append(query)
+        if len(calls) == 2:
+            raise KeyboardInterrupt()
+        return original(self, query)
+    monkeypatch.setattr(retrieval.Offline, 'search', interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        worker.run_once()
+    report = client.get(f"/api/investigations/{item['claim_id']}").json()
+    assert len(report['assertions'][0]['evidence']) == 1
+    assert len(report['assertions'][1]['evidence']) == 0
+    with connect() as db:
+        db.execute('UPDATE investigation_jobs SET lease_until=0')
+    monkeypatch.setattr(retrieval.Offline, 'search', original)
+    worker.run_once()
+    report = client.get(f"/api/investigations/{item['claim_id']}").json()
+    assert report['stage'] == 'complete'
+    assert len(report['assertions'][0]['evidence']) == 1
+    assert len(report['searches']) == 3
+    assert [s['state'] for s in report['searches']] == ['complete', 'interrupted', 'complete']
+
+
+def test_only_approved_live_relevance_is_exported(client, monkeypatch):
+    original = retrieval.Offline.search
+    def simulated_live(self, query):
+        return [{**x, 'fixture': False, 'method': 'mock-live-test-only'} for x in original(self, query)]
+    monkeypatch.setattr(retrieval.SerpAPI, 'search', simulated_live)
+    item = finished(client, provider='serpapi')
+    evidence = item['assertions'][0]['evidence'][0]
+    feedback = client.post(f"/api/evidence/{evidence['id']}/feedback", json={'reviewer': 'test-session', 'dimension': 'relevance', 'label': 'relevant'}).json()
+    assert training.export()['examples'] == 0
+    path = f"/api/admin/feedback/{feedback['id']}/review"
+    client.post(path, headers=AUTH, json={'decision': 'approved', 'reason': 'Test relevance boundary'})
+    assert training.export()['examples'] == 1
+    client.post(path, headers=AUTH, json={'decision': 'rejected', 'reason': 'Test revocation boundary'})
+    assert training.export()['examples'] == 0
 
 
 def test_insufficient_training_and_promotion(client):

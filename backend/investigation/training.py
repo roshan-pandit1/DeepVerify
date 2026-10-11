@@ -155,6 +155,8 @@ def evaluate(model_id):
     enough(data, train_ids, test_ids, groups)
     if train_ids != model['train_indices'] or test_ids != model['test_indices'] or model['feature_version'] != FEATURE_VERSION:
         raise ValueError('Split or feature version mismatch')
+    if len(model['coefficients']) != len(FEATURES) or not all(math.isfinite(x) for x in model['coefficients'] + [model['intercept']]):
+        raise ValueError('Invalid candidate coefficients')
     candidate = lambda x: sum(a * b for a, b in zip(x, model['coefficients'])) + model['intercept']
     base, result = metrics(data, test_ids, baseline), metrics(data, test_ids, candidate)
     report = {'model_id': model_id, 'model_hash': digest(model), 'dataset_id': model['dataset_id'],
@@ -162,6 +164,8 @@ def evaluate(model_id):
               'baseline': base, 'candidate': result, 'eligible': eligible_metrics(base, result),
               'limitations': 'Offline reviewed relevance only; lexical related-claim grouping can miss paraphrases. Small-data metrics are not real-world accuracy. No stance training. Fixed holdout must not be repeatedly tuned against.'}
     write(f'{model_id}.evaluation.json', report)
+    with connect() as db:
+        db.execute('INSERT INTO model_evaluations VALUES (?,?,?,?)', (uid(), model_id, json.dumps(report, sort_keys=True), now()))
     return report
 
 
@@ -169,6 +173,8 @@ def promote(model_id):
     # Recompute rather than trusting a supplied evaluation report or stale approval state.
     report = evaluate(model_id)
     if not report['eligible']:
+        with connect() as db:
+            db.execute('INSERT INTO model_decisions VALUES (?,?,?,?)', (uid(), model_id, 'promotion rejected: failed evaluation', now()))
         raise ValueError('Promotion rejected: candidate must improve NDCG@5 by >=0.01 without reducing precision@5.')
     activate(model_id, 'promote')
     return report

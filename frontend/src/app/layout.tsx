@@ -3,13 +3,13 @@ import "bootstrap/dist/css/bootstrap.min.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "DeepVerify — Multi-Modal Video Authenticity Engine",
+  title: "DeepVerify — Claim Investigations",
   description:
-    "Professional deepfake and cheapfake detection using C2PA cryptographic verification, computer vision, audio analysis, and OSINT reverse image search.",
-  keywords: ["deepfake detection", "video authenticity", "C2PA", "cheapfake", "forensics"],
+    "Investigate factual assertions, inspect source evidence, and build a reviewed research memory.",
+  keywords: ["claims", "evidence", "investigation", "research"],
   openGraph: {
-    title: "DeepVerify — Video Authenticity Engine",
-    description: "AI-powered forensic analysis for video authenticity verification",
+    title: "DeepVerify — Claim Investigations",
+    description: "Evidence, uncertainty, and reviewed research memory",
     type: "website",
   },
 };

@@ -4,11 +4,13 @@ import socket
 import ssl
 import http.client
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from urllib.parse import urlsplit, urljoin
 
 from bs4 import BeautifulSoup
 
 MAX_BYTES = 1_000_000
+DNS_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix='public-dns')
 
 
 def destination(url):
@@ -18,8 +20,14 @@ def destination(url):
     port = parts.port or (443 if parts.scheme == 'https' else 80)
     if port not in (80, 443):
         raise ValueError('Only public web ports 80 and 443 are allowed.')
-    addresses = list({x[4][0] for x in socket.getaddrinfo(parts.hostname, port, type=socket.SOCK_STREAM)})
-    if not addresses or any(not ipaddress.ip_address(a).is_global for a in addresses):
+    future = DNS_POOL.submit(socket.getaddrinfo, parts.hostname, port, type=socket.SOCK_STREAM)
+    try:
+        addresses = list({x[4][0] for x in future.result(timeout=3)})
+    except TimeoutError as exc:
+        future.cancel()
+        raise ValueError('Public URL DNS lookup timed out. Submit the claim as text.') from exc
+    ips = [ipaddress.ip_address(a) for a in addresses]
+    if not ips or any(not ip.is_global or ip.is_reserved or ip.is_multicast for ip in ips):
         raise ValueError('Private, reserved, and non-public destinations are blocked.')
     return parts, port, addresses[0]
 
@@ -46,6 +54,8 @@ def fetch_article(url):
                 continue
             if response.status != 200:
                 raise ValueError(f'Article returned HTTP {response.status}. Submit a text excerpt instead.')
+            if response.getheader('Content-Encoding', 'identity') != 'identity':
+                raise ValueError('Compressed article responses are unsupported. Submit a text excerpt.')
             if 'text/html' not in response.getheader('Content-Type', '') and 'text/plain' not in response.getheader('Content-Type', ''):
                 raise ValueError('Only HTML or plain-text articles are supported.')
             chunks, total = [], 0

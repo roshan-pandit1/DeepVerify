@@ -42,6 +42,8 @@ def score(x, model_id='baseline-v1'):
         if len(x) != len(data['coefficients']):
             raise ValueError('feature count mismatch')
         z = sum(a * b for a, b in zip(x, data['coefficients'])) + data['intercept']
+        if not math.isfinite(z):
+            raise ValueError('invalid model coefficients')
         return 1 / (1 + math.exp(-max(-700, min(700, z)))), model_id
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, TypeError, OverflowError):
         return baseline(x), 'baseline-v1 (artifact unavailable)'

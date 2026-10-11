@@ -80,6 +80,8 @@ def migrate():
           decision TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS model_decisions (
           id TEXT PRIMARY KEY, model_id TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS model_evaluations (
+          id TEXT PRIMARY KEY, model_id TEXT NOT NULL, report_json TEXT NOT NULL, created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS active_ranker (singleton INTEGER PRIMARY KEY CHECK(singleton=1), model_id TEXT NOT NULL);
         INSERT OR IGNORE INTO active_ranker VALUES (1, 'baseline-v1');
         ''')
