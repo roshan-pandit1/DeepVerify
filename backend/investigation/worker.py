@@ -3,10 +3,10 @@ import argparse
 import json
 import time
 
-from . import retrieval
+from . import retrieval, sources
 from .ranking import features, score
 from .review import update_assessments
-from .stance import classify
+from .stance import classifier
 from .store import connect, migrate, now, uid, rows, audit
 
 LEASE_SECONDS = 120
@@ -56,7 +56,13 @@ def run_once():
                 if url in seen:
                     continue
                 seen.add(url)
-                prepared.append((item, url))
+                # Each bounded fetch renews the lease; never hold a DB transaction over network IO.
+                with connect() as db:
+                    if not owned(db, claim_id, owner):
+                        return True
+                    db.execute('UPDATE investigation_jobs SET lease_until=? WHERE claim_id=? AND owner=?',
+                               (time.time() + LEASE_SECONDS, claim_id, owner))
+                prepared.append((sources.enrich(item, assertion['assertion_text']), url))
             with connect() as db:
                 db.execute('BEGIN IMMEDIATE')
                 if not owned(db, claim_id, owner):
@@ -69,12 +75,13 @@ def run_once():
                     evidence_id = uid()
                     x = features(assertion['assertion_text'], item['passage'], item['publication_date'])
                     rank, ranker = score(x, active)
-                    stance, explanation = classify(assertion['assertion_text'], item['passage'])
+                    classification = classifier().classify(assertion['assertion_text'], item['passage'], item['context'])
                     db.execute('INSERT INTO evidence_items VALUES (?,?,?,?,?,?,?,?)',
                                (evidence_id, assertion['id'], item['title'], item['url'], item['passage'], 'NEUTRAL', 0.0, now()))
                     db.execute('INSERT INTO evidence_details VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                                (evidence_id, url, item['publication_date'], item['method'], item['kind'], rank,
-                                stance, 'conservative-lexical-triage-v1', explanation, int(item['fixture']), ranker, json.dumps(x)))
+                                classification['stance'], classification['method'], classification['explanation'], int(item['fixture']), ranker, json.dumps(x)))
+                    sources.persist(db, evidence_id, assertion['id'], item)
                 db.execute("UPDATE searches SET state='complete', retrieved_at=? WHERE id=?", (now(), search_id))
                 update_assessments(db, claim_id)
                 audit(db, claim_id, 'retrieval', f"Assertion {assertion['id']}: {len(prepared)} distinct source URLs; {provider_name}")

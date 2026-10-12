@@ -27,7 +27,12 @@ def eligible_data(db):
     for row in data:
         row['features'] = json.loads(row['features'])
         row['label'] = int(row['label'] == 'relevant')
-    return data
+        source = db.execute('''SELECT s.content_hash, s.final_url FROM source_passages p
+                               JOIN source_documents s ON s.id=p.source_id WHERE p.evidence_id=?''', (row['evidence_id'],)).fetchone()
+        if source:
+            row['source'] = dict(source)
+    from .datasets import exclude_reserved
+    return exclude_reserved(data, db)
 
 
 def grouped_split(data):
@@ -50,8 +55,11 @@ def grouped_split(data):
         for j in range(i):
             b = data[j]
             similarity = len(words[i] & words[j]) / max(1, len(words[i] | words[j]))
+            sa, sb = a.get('source') or {}, b.get('source') or {}
+            duplicate_document = bool(sa.get('content_hash') and sa['content_hash'] == sb.get('content_hash'))
+            same_final_url = bool(sa.get('final_url') and sa['final_url'] == sb.get('final_url'))
             if (a['claim_id'] == b['claim_id'] or a['canonical_url'] == b['canonical_url']
-                    or passages[i] == passages[j] or similarity >= 0.35):
+                    or duplicate_document or same_final_url or passages[i] == passages[j] or similarity >= 0.35):
                 parent[root(i)] = root(j)
     groups = defaultdict(list)
     for i in range(len(data)):
@@ -142,6 +150,36 @@ def train(identifier):
     return {'model_id': model_id, 'train_examples': len(train_ids), 'test_examples': len(test_ids), 'groups': groups}
 
 
+def train_reviewed(identifier):
+    """Fit only the immutable train partition; validation selects, holdout never selects."""
+    from sklearn.linear_model import LogisticRegression
+    import sklearn
+    from . import datasets
+    data = datasets.load(identifier)
+    if data['dataset']['synthetic']:
+        raise ValueError('Synthetic evaluation datasets cannot train promotable models')
+    with connect() as db:
+        if db.execute('SELECT 1 FROM evaluation_holdout_locks WHERE dataset_id=?', (identifier,)).fetchone():
+            raise ValueError('Final holdout audit already started; this dataset cannot be used for further model selection')
+    train_rows = datasets.ranking_rows(data, 'train')
+    validation = datasets.ranking_rows(data, 'validation')
+    all_rows = train_rows + validation
+    groups = len({c['component'] for c in data['cases'] if c['split'] != 'holdout'})
+    enough(all_rows, list(range(len(train_rows))), list(range(len(train_rows), len(all_rows))), groups)
+    model = LogisticRegression(random_state=data['dataset']['seed'], max_iter=1000, class_weight='balanced')
+    model.fit([r['features'] for r in train_rows], [r['label'] for r in train_rows])
+    model_id = 'candidate-' + uid()
+    artifact = {'model_id': model_id, 'created_at': now(), 'evaluation_dataset_id': identifier,
+                'evaluation_dataset_hash': data['dataset']['frozen_hash'], 'feature_version': FEATURE_VERSION,
+                'features': FEATURES, 'sklearn_version': sklearn.__version__, 'seed': data['dataset']['seed'],
+                'coefficients': model.coef_[0].tolist(), 'intercept': float(model.intercept_[0]),
+                'train_example_ids': [r['feedback_id'] for r in train_rows],
+                'validation_example_ids': [r['feedback_id'] for r in validation], 'groups': groups}
+    write(f'{model_id}.json', artifact)
+    return {'model_id': model_id, 'train_examples': len(train_rows), 'validation_examples': len(validation),
+            'holdout_used': False, 'seed': data['dataset']['seed']}
+
+
 def load_model(model_id):
     if not re.fullmatch(r'candidate-[a-f0-9-]{36}', model_id):
         raise ValueError('Invalid candidate ID')
@@ -150,6 +188,16 @@ def load_model(model_id):
 
 def evaluate(model_id):
     model = load_model(model_id)
+    if model.get('evaluation_dataset_id'):
+        with connect() as db:
+            if db.execute('SELECT 1 FROM evaluation_holdout_locks WHERE dataset_id=?', (model['evaluation_dataset_id'],)).fetchone():
+                raise ValueError('Final holdout audit already started; use stored reports or rollback, not new model selection')
+        from .evaluation import evaluate as stage_evaluate
+        result = stage_evaluate(model['evaluation_dataset_id'], model_id, 'validation')
+        return {'model_id': model_id, 'model_hash': digest(model), 'dataset_id': model['evaluation_dataset_id'],
+                'baseline': result['ranking']['baseline'], 'candidate': result['ranking']['candidate'],
+                'eligible': result['ranking']['promotion_gate_passed'], 'stage_report_id': result['report_id'],
+                'partition': 'validation', 'holdout_used': False}
     data = load_dataset(model['dataset_id'])
     train_ids, test_ids, groups = grouped_split(data)
     enough(data, train_ids, test_ids, groups)
@@ -162,7 +210,8 @@ def evaluate(model_id):
     report = {'model_id': model_id, 'model_hash': digest(model), 'dataset_id': model['dataset_id'],
               'evaluated_at': now(), 'groups': groups, 'train_examples': len(train_ids),
               'baseline': base, 'candidate': result, 'eligible': eligible_metrics(base, result),
-              'limitations': 'Offline reviewed relevance only; lexical related-claim grouping can miss paraphrases. Small-data metrics are not real-world accuracy. No stance training. Fixed holdout must not be repeatedly tuned against.'}
+              'partition': 'validation', 'holdout_used': False,
+              'limitations': 'Reviewed relevance only; lexical grouping can miss paraphrases. This legacy split is validation, not a frozen final holdout. No stance training; reserved evaluation groups are excluded.'}
     write(f'{model_id}.evaluation.json', report)
     with connect() as db:
         db.execute('INSERT INTO model_evaluations VALUES (?,?,?,?)', (uid(), model_id, json.dumps(report, sort_keys=True), now()))
@@ -171,7 +220,12 @@ def evaluate(model_id):
 
 def promote(model_id):
     # Recompute rather than trusting a supplied evaluation report or stale approval state.
-    report = evaluate(model_id)
+    try:
+        report = evaluate(model_id)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        with connect() as db:
+            db.execute('INSERT INTO model_decisions VALUES (?,?,?,?)', (uid(), model_id, 'promotion rejected: evaluation unavailable or insufficient data', now()))
+        raise ValueError(f'Promotion rejected; active model retained. {exc}') from exc
     if not report['eligible']:
         with connect() as db:
             db.execute('INSERT INTO model_decisions VALUES (?,?,?,?)', (uid(), model_id, 'promotion rejected: failed evaluation', now()))
@@ -198,7 +252,7 @@ def rollback(model_id):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['export', 'train', 'evaluate', 'promote', 'rollback'])
+    parser.add_argument('command', choices=['export', 'train', 'train-reviewed', 'evaluate', 'promote', 'rollback'])
     parser.add_argument('identifier', nargs='?', default='baseline-v1')
     parser.add_argument('--token', required=True, help='Must match INVESTIGATION_ADMIN_TOKEN')
     args = parser.parse_args()
@@ -207,7 +261,7 @@ def main():
         parser.error('Valid administrator token required')
     migrate()
     try:
-        actions = {'export': export, 'train': train, 'evaluate': evaluate, 'promote': promote, 'rollback': rollback}
+        actions = {'export': export, 'train': train, 'train-reviewed': train_reviewed, 'evaluate': evaluate, 'promote': promote, 'rollback': rollback}
         result = actions[args.command]() if args.command == 'export' else actions[args.command](args.identifier)
         print(json.dumps(result, indent=2))
     except (ValueError, OSError) as exc:

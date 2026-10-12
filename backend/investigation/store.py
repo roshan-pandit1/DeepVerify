@@ -84,8 +84,36 @@ def migrate():
           id TEXT PRIMARY KEY, model_id TEXT NOT NULL, report_json TEXT NOT NULL, created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS active_ranker (singleton INTEGER PRIMARY KEY CHECK(singleton=1), model_id TEXT NOT NULL);
         INSERT OR IGNORE INTO active_ranker VALUES (1, 'baseline-v1');
+        CREATE TABLE IF NOT EXISTS source_documents (
+          id TEXT PRIMARY KEY, source_url TEXT NOT NULL, final_url TEXT NOT NULL, retrieved_at TEXT NOT NULL,
+          method TEXT NOT NULL, status TEXT NOT NULL, title TEXT NOT NULL, main_text TEXT NOT NULL,
+          publication_date TEXT, date_method TEXT, content_hash TEXT, body_hash TEXT, error TEXT, synthetic INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS source_passages (
+          evidence_id TEXT PRIMARY KEY REFERENCES evidence_items(id), source_id TEXT NOT NULL REFERENCES source_documents(id),
+          assertion_id TEXT NOT NULL REFERENCES assertions(id), start_offset INTEGER, end_offset INTEGER,
+          context TEXT NOT NULL, context_start INTEGER, context_end INTEGER, search_snippet TEXT NOT NULL, selection_method TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS evaluation_datasets (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL, format_version TEXT NOT NULL,
+          seed INTEGER NOT NULL, synthetic INTEGER NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL,
+          frozen_hash TEXT, UNIQUE(name, version));
+        CREATE TABLE IF NOT EXISTS evaluation_cases (
+          id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL REFERENCES evaluation_datasets(id),
+          assertion_id TEXT NOT NULL REFERENCES assertions(id), related_group TEXT NOT NULL,
+          temporal_context TEXT NOT NULL, categories TEXT NOT NULL, snapshot_json TEXT NOT NULL,
+          split TEXT, component TEXT, UNIQUE(dataset_id, assertion_id));
+        CREATE TABLE IF NOT EXISTS evaluation_labels (
+          id TEXT PRIMARY KEY, case_id TEXT NOT NULL REFERENCES evaluation_cases(id), target TEXT NOT NULL,
+          dimension TEXT NOT NULL, label TEXT NOT NULL, reviewer TEXT NOT NULL, status TEXT NOT NULL,
+          reason TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS evaluation_reports (
+          id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL REFERENCES evaluation_datasets(id), partition TEXT NOT NULL,
+          model_id TEXT NOT NULL, report_json TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS evaluation_holdout_locks (
+          dataset_id TEXT PRIMARY KEY REFERENCES evaluation_datasets(id), model_hash TEXT NOT NULL,
+          report_id TEXT NOT NULL, created_at TEXT NOT NULL);
         ''')
         db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (1, ?)', (now(),))
+        db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (2, ?)', (now(),))
 
 
 def audit(db, claim_id, stage, output):
@@ -99,4 +127,4 @@ def rows(db, sql, args=()):
 
 if __name__ == '__main__':
     migrate()
-    print('Additive investigation migration 1 applied; existing records preserved.')
+    print('Additive investigation migrations through 2 applied; existing records preserved.')

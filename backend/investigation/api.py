@@ -115,6 +115,11 @@ def detail(claim_id: str):
             for evidence in assertion['evidence']:
                 evidence['effective_stance'] = effective_stance(db, evidence['id'], evidence['predicted_stance'])
                 evidence['feedback'] = rows(db, 'SELECT id, dimension, label, approval, created_at FROM feedback WHERE evidence_id=?', (evidence['id'],))
+                source = db.execute('''SELECT p.*, s.source_url, s.final_url, s.retrieved_at AS source_retrieved_at,
+                    s.method AS extraction_method, s.status AS extraction_status, s.publication_date AS source_publication_date,
+                    s.date_method, s.content_hash, s.body_hash, s.error AS extraction_error
+                    FROM source_passages p JOIN source_documents s ON s.id=p.source_id WHERE p.evidence_id=?''', (evidence['id'],)).fetchone()
+                evidence['source'] = dict(source) if source else None
         item['searches'] = rows(db, 'SELECT * FROM searches WHERE claim_id=? ORDER BY rowid', (claim_id,))
         item['audit'] = rows(db, 'SELECT * FROM audit_log_entries WHERE claim_id=? ORDER BY rowid', (claim_id,))
         item['related'] = related(db, claim_id)
@@ -163,9 +168,13 @@ def feedback(evidence_id: str, body: Feedback):
 @app.get('/api/admin/feedback', dependencies=[Depends(admin)])
 def pending():
     with connect() as db:
-        return {'feedback': rows(db, '''SELECT f.*, a.assertion_text, e.content_snippet, e.source_url, d.predicted_stance, d.fixture
+        return {'feedback': rows(db, '''SELECT f.*, a.assertion_text, e.content_snippet, e.source_url, d.predicted_stance, d.fixture,
+                     d.passage_kind, d.classification_method, d.explanation AS stance_explanation,
+                     p.context, s.status AS extraction_status, s.error AS extraction_error
                      FROM feedback f JOIN evidence_items e ON e.id=f.evidence_id JOIN assertions a ON a.id=e.assertion_id
-                     JOIN evidence_details d ON d.evidence_id=e.id ORDER BY f.created_at DESC'''),
+                     JOIN evidence_details d ON d.evidence_id=e.id
+                     LEFT JOIN source_passages p ON p.evidence_id=e.id LEFT JOIN source_documents s ON s.id=p.source_id
+                     ORDER BY f.created_at DESC'''),
                 'review_history': rows(db, 'SELECT * FROM feedback_reviews ORDER BY created_at DESC')}
 
 
@@ -191,3 +200,21 @@ def learning():
         return {'active_ranker': active, 'effective_ranker': effective, 'approved_live_examples': count,
                 'status': 'collecting reviewed feedback' if effective.startswith('baseline-v1') else 'reviewed candidate active',
                 'memory': LexicalMemory.version, 'training': 'Batch only; searches update memory, not model weights.'}
+
+
+@app.get('/api/admin/evaluations', dependencies=[Depends(admin)])
+def evaluations():
+    with connect() as db:
+        return {'datasets': rows(db, 'SELECT * FROM evaluation_datasets ORDER BY created_at DESC'),
+                'reports': [json.loads(r['report_json']) for r in rows(db, 'SELECT report_json FROM evaluation_reports ORDER BY created_at DESC LIMIT 50')],
+                'promotion_decisions': rows(db, 'SELECT * FROM model_decisions ORDER BY created_at DESC LIMIT 50'),
+                'legacy_ranking_reports': [json.loads(r['report_json']) for r in rows(db, 'SELECT report_json FROM model_evaluations ORDER BY created_at DESC LIMIT 20')]}
+
+
+@app.get('/api/sources/{source_id}')
+def source_document(source_id: str):
+    with connect() as db:
+        source = db.execute('SELECT * FROM source_documents WHERE id=?', (source_id,)).fetchone()
+        if not source:
+            raise HTTPException(404, 'Source document not found')
+        return dict(source)
