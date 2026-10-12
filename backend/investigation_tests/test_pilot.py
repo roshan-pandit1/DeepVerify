@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import subprocess
 
 import httpx
 import pytest
@@ -85,6 +86,19 @@ def test_candidate_collection_preserves_source_provenance_and_no_approvals(clien
     assert c['independent_review']['required_reviewers'] == 2
     assert pilot.benchmark_status(identifier)['approved_labels'] == 0
     assert analyze(identifier)['status'].startswith('not measured')
+
+
+def test_worker_failure_keeps_durable_pending_run_without_leaking_command(client, monkeypatch):
+    monkeypatch.setenv('SERPAPI_API_KEY', 'SYNTHETIC-NETWORK-MOCK-KEY')
+    def interrupted(*args, **kwargs):
+        raise subprocess.TimeoutExpired('SYNTHETIC-SENSITIVE-COMMAND', 1)
+    monkeypatch.setattr(pilot.subprocess, 'run', interrupted)
+    result = pilot.start_run('collection', {'version': pilot.SPEC_VERSION, 'cases': pilot.validation_plans()[:1]},
+        os.environ['INVESTIGATION_ADMIN_TOKEN'], True, max_searches=1, unit_cost=.01, max_cost=.01)
+    assert result['status'] == 'pending worker'
+    assert result['worker_process_failure']
+    assert result['requests_reserved'] == {}
+    assert 'SYNTHETIC-SENSITIVE-COMMAND' not in json.dumps(result)
 
 
 def test_blind_packets_and_blank_sheet_do_not_reveal_predictions(client, tmp_path):

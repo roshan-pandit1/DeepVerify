@@ -185,12 +185,20 @@ def start_run(kind, spec, token, execute=False, max_searches=4, per_query_source
         with connect() as db:
             db.execute('UPDATE pilot_runs SET specification=? WHERE id=?', (json.dumps(redact(spec)), run_id))
     # Real independent processes, bounded iterations, and shared durable state.
+    process_failure = None
     for _ in plans:
-        subprocess.run([sys.executable, '-m', 'investigation.worker', '--once', '--run-id', run_id],
-                       timeout=60 + per_query_sources * 30, check=True, capture_output=True)
+        try:
+            subprocess.run([sys.executable, '-m', 'investigation.worker', '--once', '--run-id', run_id],
+                           timeout=60 + per_query_sources * 30, check=True, capture_output=True)
+        except subprocess.SubprocessError:
+            process_failure = 'Worker process interrupted or failed. Inspect persisted job/search state; recover after lease expiry within the remaining budget.'
+            break
     if dataset_id:
         capture(run_id)
-    return run_report(run_id)
+    report = run_report(run_id)
+    if process_failure:
+        report['worker_process_failure'] = process_failure
+    return report
 
 
 def capture(run_id):
