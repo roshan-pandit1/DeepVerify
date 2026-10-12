@@ -2,7 +2,7 @@
 
 An evidence-based claim investigation platform: **claim/article → editable assertions → durable retrieval worker → assertion-level report → reviewed feedback → persistent research memory**.
 
-This repository includes the first investigation milestone and the second evidence-quality/evaluation milestone. Next.js and FastAPI are retained. Blockchain, psychological/threat scoring, Telegram, and media forensics remain legacy code outside the investigation entry point. **Real-world evaluation is pending: no real reviewed corpus or live-provider credentials were available during milestone-two verification.**
+This repository includes investigation, source-quality evaluation, and milestone-three live-validation/pilot-review tooling. Next.js and FastAPI are retained. Blockchain, psychological/threat scoring, Telegram, and media forensics remain legacy code outside the investigation entry point. **Real-world evaluation is not yet measured: the checked environment has no SerpAPI key, administrator token, collected benchmark cases, or approved labels. The local database is now initialized.**
 
 ## Setup
 
@@ -44,7 +44,7 @@ cd backend
 ../.venv/bin/python -m investigation.store
 ```
 
-This reuses `claims`, `assertions`, `evidence_items`, and `audit_log_entries` with their existing SQLAlchemy names and enum values. Additive migrations 1 and 2 create investigation, metadata, jobs, searches, feedback, source-document/passage, reviewed-dataset, evaluation, and model-provenance tables. Existing rows, feedback, memory, active ranker, and rollback history are preserved. Historical evidence is not silently refetched or reclassified. Only investigations created by the new pipeline appear in its history.
+This reuses `claims`, `assertions`, `evidence_items`, and `audit_log_entries` with their existing SQLAlchemy names and enum values. Additive migrations 1–3 create investigation, source, evaluation, budget-ledger, independent-review and provenance tables. Existing rows, dataset versions, frozen hashes/splits, feedback, memory, active ranker, and rollback history are preserved. Historical evidence is not silently refetched or reclassified. Only investigations created by the new pipeline appear in its history.
 
 In three terminals, from the repository root:
 
@@ -240,7 +240,106 @@ Stage reports persist JSON and readable Markdown under `INVESTIGATION_ARTIFACTS`
 - **Sufficiency:** captured report assessment versus independent sufficiency review, including insufficient-case precision/recall and confusion matrix; compared with an always-insufficient baseline. No new sufficiency accuracy is asserted.
 - **Citation support:** human-reviewed justified/not-justified/needs-review counts for citations attached to non-insufficient assessments, plus justified rate among resolved judgments. There is no automatic citation-support probability.
 
-Ranking promotion requires validation NDCG@5 improvement ≥0.01 with no precision@5 regression. Stance metrics do not authorize ranking promotion. Insufficient data, malformed/unavailable evaluation, or no improvement retain the currently active model and record rejection; rollback remains available. A frozen holdout is reserved atomically for **one model/method audit**; repeating the same request returns the saved report, and other model/method requests are rejected. A candidate must already have been selected/promoted on validation. Once the final audit starts, further fitting/validation/promotion on that dataset is closed. Holdout results cannot authorize promotion. An interrupted audit keeps its reservation rather than silently exposing the holdout again. Local database/filesystem administrators remain trusted; this is procedural isolation, not a cryptographic data enclave.
+Ranking promotion requires validation NDCG@5 improvement ≥0.01 with no precision@5 regression. Milestone three additionally requires paired component-bootstrap 95% lower bounds **>0 for NDCG@5 difference and ≥0 for precision@5 difference**, with at least three components to compute the interval. This strengthens the prior gates; three groups is not a claim of statistical adequacy. Stance metrics do not authorize ranking promotion. Insufficient data, inconclusive uncertainty, malformed/unavailable evaluation, or no improvement retain the currently active model and record rejection; rollback remains available. A frozen holdout is reserved atomically for **one final model audit**; identical requests return the saved report. Historical final reports for the same model artifact remain historical, not recomputed under new method versions. A candidate must already have been selected/promoted on validation. Once final auditing starts, further fitting/validation/promotion on that dataset is closed. Holdout results cannot authorize promotion. An interrupted audit retains its reservation. Local database/filesystem administrators remain trusted; this is procedural isolation, not a cryptographic data enclave.
+
+## Milestone three: readiness, bounded live checks, and the pilot
+
+See [the pilot/review operating guide](docs/pilot-review-guide.md) for collection fields, blind review definitions/examples, CSV review sheets, disagreement adjudication, agreement statistics and failure observations. [The versioned benchmark specification](docs/pilot-benchmark-spec.json) targets approximately **60 claim groups** across six topics. Its `cases` array is intentionally empty: there are no fabricated completed cases or approved labels.
+
+From `backend/`:
+
+```sh
+# Readiness exposes booleans/counts, never credentials; initialize applies additive migrations.
+../.venv/bin/python -m investigation.pilot readiness --initialize
+# With the API/frontend already running, additionally check their HTTP status.
+../.venv/bin/python -m investigation.pilot readiness --api-url http://127.0.0.1:8000 --frontend-url http://localhost:3000
+```
+
+Reports include migrations, provider/admin availability, counts, active/effective model, job state, last observed worker iteration and dataset eligibility. A worker observation is not proof of continuous liveness. Missing database migrations are reported explicitly. `SERPAPI_API_KEY` enables the existing provider; a Supabase project reference or Supabase credential cannot authorize SerpAPI and does not configure this SQLite pipeline. Configure secrets in the ignored backend environment file, never in commands committed to Git or review packets.
+
+**Bounded live operational validation:** replace the example per-search price bound with an upper estimate from your own SerpAPI plan. It is not a quoted provider price. This command requires both configured credentials and the matching administrator token:
+
+```sh
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" live-validate \
+  --execute --max-searches 4 --sources-per-query 3 --unit-cost-usd 0.01 --max-cost-usd 0.04
+```
+
+Four unlabeled validation assertions cover a straightforward fact, a dated public-office assertion, a qualified health assertion, and a prospective insufficient-evidence probe. Coverage tags are planned strata, not true/false verdicts. A public `example.com` page is separately probed for non-article extraction behavior; its actual outcome is recorded and never added as evidence. Limits above mean at most **4 paid search attempts, 13 source-fetch reservations, and 52 source HTTP requests** (up to four redirects/requests per source), plus the four provider requests. No automatic retries escape the shared SQLite budget ledger. Crashes/failures consume reservations conservatively. The declared cost cap is enforced using the supplied price estimate; actual account billing still depends on the provider plan. Missing credentials generate a **blocked report with zero requests**, not fixture evidence. Successful report generation is not successful live validation: inspect the report's `status` and outcomes.
+
+The command uses the existing API tables and **separate worker processes**. Query/provider/time/latency, source URLs and extraction latency, context, hashes, offset traceability, failures/fallbacks, and reserved cost are recorded. To inspect or resume a partially processed run:
+
+```sh
+export RUN_ID='returned-run-id'
+../.venv/bin/python -m investigation.worker --once --run-id "$RUN_ID"
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" run-report "$RUN_ID"
+```
+
+**Collection:** copy the specification to the ignored artifact directory and populate real, curator-selected assertion plans following the operating guide. Leave the checked-in template unpopulated. Initialize the candidate dataset only after administrator configuration:
+
+```sh
+mkdir -p investigation-data
+cp -n ../docs/pilot-benchmark-spec.json investigation-data/pilot-plan.json
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" init-benchmark --version pilot-1
+export EVAL_DATASET_ID='returned-dataset-id'
+# Populate investigation-data/pilot-plan.json with actual plans before collecting.
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" collect \
+  --spec investigation-data/pilot-plan.json --dataset "$EVAL_DATASET_ID" --execute \
+  --max-searches 10 --sources-per-query 8 --unit-cost-usd 0.01 --max-cost-usd 0.10
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" capture "$RUN_ID"
+```
+
+Collection defaults to eight source candidates/query to permit five-result ranking evaluation; the live operational smoke defaults to three. Repeating collection skips already scheduled claim groups for the selected dataset. Each batch has an independent explicit cap; a 60-group collection requires several bounded batches and a corresponding total spend decision. If a worker is interrupted, its lease/budget reservations persist; `capture` captures completed/partial reports after recovery. An empty specification stays unpopulated. Captured cases have claim/source-group identifiers, snapshot hashes, source metadata/context and **no automatically approved labels**.
+
+**Independent review and export:**
+
+```sh
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" packet "$EVAL_DATASET_ID" --phase initial
+# Each actual reviewer fills their own copy of the blank CSV response sheet.
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" submit-sheet \
+  investigation-data/reviewer-a.csv --reviewer 'actual-reviewer-id'
+# After first-pass relevance/stance/sufficiency opinions, reveal the assessment for citation review.
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" packet "$EVAL_DATASET_ID" --phase citation
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" agreement "$EVAL_DATASET_ID"
+# Explicit human adjudication, repeated independently for each required dimension/target:
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" adjudicate "$CASE_ID" \
+  --target "$EVIDENCE_ID" --dimension relevance --label "$RELEVANCE_LABEL" \
+  --reviewer 'actual-adjudicator-id' --reason "$REASON"
+../.venv/bin/python -m investigation.evaluation --token "$INVESTIGATION_ADMIN_TOKEN" export "$EVAL_DATASET_ID"
+../.venv/bin/python -m investigation.evaluation --token "$INVESTIGATION_ADMIN_TOKEN" freeze "$EVAL_DATASET_ID"
+```
+
+Initial packets hide scores, predicted stance, assessments, sampling tags and other reviewers' opinions; source ordering is independent of ranking. At least 20% of collected claim groups require two distinct reviewers and an adjudicator distinct from both. All pilot labels, including agreeing/single-review labels, require explicit human adjudication. Direct legacy `label --status approved` cannot bypass pilot review policies. New opinions invalidate superseded approvals; disagreements and decision history remain visible. Blank sheet rows are skipped, never inferred. Reviewer identifiers are self-reported under the existing shared token, not verified accounts. This is practical blinding, not access control against a filesystem administrator.
+
+**Baseline, comparison, final audit, and rollback:**
+
+```sh
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" status --dataset "$EVAL_DATASET_ID"
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" evaluate "$EVAL_DATASET_ID"
+../.venv/bin/python -m investigation.training train-reviewed "$EVAL_DATASET_ID" --token "$INVESTIGATION_ADMIN_TOKEN"
+export MODEL_ID='returned-eligible-candidate-id'
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" evaluate "$EVAL_DATASET_ID" --model "$MODEL_ID"
+../.venv/bin/python -m investigation.pilot --token "$INVESTIGATION_ADMIN_TOKEN" failures --dataset "$EVAL_DATASET_ID"
+# Only if the predeclared validation and uncertainty gates pass:
+../.venv/bin/python -m investigation.training promote "$MODEL_ID" --token "$INVESTIGATION_ADMIN_TOKEN"
+../.venv/bin/python -m investigation.evaluation --token "$INVESTIGATION_ADMIN_TOKEN" \
+  evaluate "$EVAL_DATASET_ID" --model "$MODEL_ID" --partition holdout
+../.venv/bin/python -m investigation.training rollback baseline-v1 --token "$INVESTIGATION_ADMIN_TOKEN"
+# Or rollback to a previously promoted candidate:
+../.venv/bin/python -m investigation.training rollback "$MODEL_ID" --token "$INVESTIGATION_ADMIN_TOKEN"
+```
+
+The existing feedback-only export/train commands remain available with reserved evaluation groups excluded. No verdicts, snippets, machine proposals, or unadjudicated pilot opinions become ranking ground truth. Reports compare exactly the same development examples, include paired differences, 2,000 seed-persisted claim/source-component bootstrap draws, 95% percentile intervals and category regressions. Small/selected samples and repeated development tuning limit these intervals; they are not factual confidence scores. **Fewer than five judged retrieved results:** that query is excluded from ranking P@5/NDCG@5 and counted explicitly; other stages still include it. Missing eligible labels produce `not measured`/insufficient-data status, not zero-accuracy claims. Coverage reports distinguish assessed assertions, insufficient/abstained assertions and needs-review passages.
+
+Failure analysis uses approved **validation** cases only, never holdout cases. It traces irrelevant top-five results, within-pool relevant results below cutoff, stance errors versus abstentions, overstrong sufficiency and exact duplicates/extraction failures. Staleness and misleading context require independent human confirmation; source age alone is not proof. It recommends fixes only when corresponding observed findings exist. Truly missed web evidence requires independently identified reference sources, not inference from the collected pool. See the operating guide for recording/confirming such observations.
+
+Generated JSON/Markdown reports and blank review sheets are written under **`backend/investigation-data/pilot-reports/`** by default (ignored). `readiness`, `live-validate`, `collect`, `status`, `failures` and `synthetic-service-smoke` name their report files; packets include dataset ID and phase. Do not commit filled plans, packets, source text, reviewer data, databases, model artifacts or generated reports. [Observed milestone-three results](docs/milestone-three-results.md) contain only nonsensitive status/count summaries.
+
+With no selected dataset, these commands deliberately produce pending reports:
+
+```sh
+../.venv/bin/python -m investigation.pilot status
+../.venv/bin/python -m investigation.pilot failures
+```
 
 ## Verification
 
@@ -251,12 +350,14 @@ cd ../frontend
 npx tsc --noEmit
 npx eslint src/components/InvestigationWorkspace.tsx src/app/review/page.tsx src/app/evaluation/page.tsx src/lib/investigation-api.ts src/app/page.tsx src/app/history/page.tsx
 npm run build
+cd ../backend
+../.venv/bin/python -m investigation.smoke --with-frontend
 ```
 
-The dedicated investigation tests avoid legacy test fixtures that mock unrelated heavyweight media dependencies. Synthetic fixtures check software functionality only, not real-world factual accuracy or ranking improvement. See `docs/rebuild-status.md` for results, limitations, and credential-dependent checks.
+The dedicated investigation tests avoid legacy fixtures that mock unrelated heavyweight media dependencies. The process smoke starts an isolated API, separate worker and optional built frontend, using one explicitly offline case and a temporary admin token. It verifies authorization and secret-free logs, cleans its temporary database, and adds zero real benchmark cases. It does not configure missing real credentials or test browser interactions. Synthetic fixtures check functionality only, not factual accuracy or ranking improvement. See `docs/rebuild-status.md` for results and credential-dependent checks.
 
 ## Recovery
 
-Work is checkpointed on `rebuild/investigation-platform`. `git log --oneline rebuild/investigation-platform` lists local commits. The user pushed milestone one through `ce79374`. **Milestone-two changes are local only: no push or deployment; their remote backup remains pending authorization.** Existing records and legacy code were preserved. Generated datasets, credentials, cookies, databases, and model artifacts are not included in commits.
+Work is checkpointed on `rebuild/investigation-platform`. Milestones one and two through `983db4e` were pushed after authorization. During the milestone-three pause, the repository acquired foundation commit `55fc57d`; its remote-tracking reflog records an external push. The agent did not perform that push. **Subsequent verification/documentation checkpoints are local only, with remote backup pending authorization; nothing was deployed.** Existing records and legacy code are preserved. Generated datasets, credentials, cookies, databases, source snapshots, reviewer data and model artifacts are not included in commits.
 
-Next milestone: collect genuinely reviewed real-world datasets, validate source extraction and provider behavior on real sites, review topic/syndication grouping, and measure stage quality plus ranking improvement before making accuracy claims.
+Next measurement step: supply SerpAPI/admin configuration, populate real candidate plans, recruit independent reviewers, then use the bounded collection and frozen evaluation workflow. **Does independently reviewed feedback demonstrably improve ranking? Not yet measured.**
