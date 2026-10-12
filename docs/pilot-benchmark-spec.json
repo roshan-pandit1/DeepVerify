@@ -1,0 +1,37 @@
+{
+  "version": "real-source-pilot-v1",
+  "name": "DeepVerify real-source pilot",
+  "benchmark_version": "pilot-1",
+  "target_claim_groups": 60,
+  "seed": 17,
+  "status": "unpopulated candidate specification; no collected or approved cases",
+  "language_scope": "English-language assertions and publicly accessible English source text",
+  "geographic_scope": "Aim for UK, US, India, EU and global/multilateral coverage; record actual scope rather than claiming geographic representativeness",
+  "topic_quotas": {
+    "science_and_space": 10,
+    "public_health": 10,
+    "environment_and_climate": 10,
+    "economics_and_statistics": 10,
+    "civics_and_public_policy": 10,
+    "history_and_geography": 10
+  },
+  "difficulty_targets": {"straightforward": 20, "qualified_or_conflicting": 20, "temporal_entity_quote_or_source_challenges": 20},
+  "coverage_tags": ["supported", "contradicted", "mixed", "insufficient", "time-sensitive", "temporal-mismatch", "entity-mismatch", "quotation", "qualification", "duplicate-syndicated", "relevant-not-entailing"],
+  "selection_protocol": [
+    "A human curator supplies actual candidate assertions, temporal context and topic/group identifiers before collection.",
+    "Sampling tags are hypotheses for coverage, never completed ground-truth labels.",
+    "Use one independent claim group per plan entry; put paraphrases and historical variants in the same group.",
+    "Do not select or delete cases based on whether the model succeeds; preserve failed searches and extraction outcomes.",
+    "Include official primary sources and independently reported secondary sources when the provider returns them.",
+    "Inspect duplicate/syndicated source groups before freezing; do not treat copies as independent support.",
+    "Double-review at least 20 percent of collected claim groups and explicitly adjudicate every required label."
+  ],
+  "biases": [
+    "Convenience pilot, not statistically representative; 60 groups is a collection target, not proof of adequacy.",
+    "English/public-web and search-ranking bias; paywalled, script-only, local-language and poorly indexed evidence may be missing.",
+    "Geographic, topic and reviewer selection biases must be reported with actual collected counts.",
+    "Reranking metrics cover a bounded retrieved pool, not total search recall or population factual accuracy."
+  ],
+  "case_fields": ["group_id", "assertion", "temporal_context", "topic", "difficulty", "categories"],
+  "cases": []
+}

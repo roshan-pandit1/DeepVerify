@@ -21,6 +21,12 @@ export type Evidence = {
   publication_date: string | null; retrieved_at: string; retrieval_method: string;
   passage_kind: string; predicted_stance: string; effective_stance: string;
   classification_method: string; explanation: string; fixture: number; ranker: string; feedback: Feedback[];
+  source: {
+    source_id: string; final_url: string; source_retrieved_at: string; extraction_method: string;
+    extraction_status: string; extraction_error: string | null; content_hash: string | null;
+    body_hash: string | null; date_method: string | null; context: string; search_snippet: string;
+    start_offset: number | null; end_offset: number | null; selection_method: string;
+  } | null;
 };
 export type Assertion = {
   id: string; assertion_text: string; entity_names_json: string; dates: string; locations: string;

@@ -69,7 +69,7 @@ export default function InvestigationWorkspace() {
   }
 
   return <div className={styles.workspace}>
-    <header className={styles.header}><Link href="/" className={styles.brand}>DeepVerify <span>INVESTIGATIONS</span></Link><Link href="/review">Review desk</Link></header>
+    <header className={styles.header}><Link href="/" className={styles.brand}>DeepVerify <span>INVESTIGATIONS</span></Link><nav className={styles.row}><Link href="/review">Review desk</Link><Link href="/evaluation">Evaluation</Link></nav></header>
     <main className={styles.grid}>
       <aside className={styles.sidebar}>
         <section><h2>Research memory</h2><p>Previous investigations, with their evidence and uncertainties.</p>
@@ -122,9 +122,24 @@ export default function InvestigationWorkspace() {
               <span className={styles.eyebrow}>{evidence.fixture ? "OFFLINE FIXTURE" : evidence.passage_kind}</span>
               <h4><a href={evidence.source_url} target="_blank" rel="noopener noreferrer">{evidence.source_name} ↗</a></h4><p className={styles.url}>{evidence.source_url}</p>
               <blockquote>{evidence.content_snippet}</blockquote>
+              {evidence.source && <>
+                {evidence.source.context && <details><summary>Surrounding source context</summary><blockquote>{evidence.source.context}</blockquote></details>}
+                <p className={styles.hint}>Extraction: {evidence.source.extraction_status} · {evidence.source.extraction_method}<br />
+                  Source fetched: {date(evidence.source.source_retrieved_at)} · Date metadata: {evidence.source.date_method || "Unavailable"}</p>
+                {evidence.source.extraction_error && <p className={styles.warning}>{evidence.source.extraction_error} This evidence remains a labeled snippet fallback.</p>}
+                {evidence.source.extraction_status === "extracted" && <>
+                  <a href={evidence.source.final_url} target="_blank" rel="noopener noreferrer">Final article URL ↗</a>
+                  <details className={styles.audit}><summary>Passage provenance & original search snippet</summary>
+                    <p className={styles.hint}>Source ID: {evidence.source.source_id}<br />Text SHA-256: {evidence.source.content_hash}<br />Response SHA-256: {evidence.source.body_hash}<br />
+                      Character offsets: {evidence.source.start_offset}–{evidence.source.end_offset} · {evidence.source.selection_method}</p>
+                    <blockquote>{evidence.source.search_snippet}</blockquote>
+                  </details>
+                </>}
+              </>}
               <p className={styles.hint}>Published: {evidence.publication_date || "Unknown"} · Retrieved: {date(evidence.retrieved_at)}<br />Method: {evidence.retrieval_method} · Ranker: {evidence.ranker}</p>
-              <p><strong>Stance: {evidence.effective_stance}</strong><br />Prediction: {evidence.predicted_stance} · {evidence.classification_method}</p><p>{evidence.explanation}</p>
-              <p className={styles.hint}>A search snippet is not a full-source passage. Ranking reflects relevance, not truth or probability. Publication dates are provider-supplied when available.</p>
+              <p><strong>Stance: {evidence.effective_stance}</strong><br />Prediction: {evidence.predicted_stance} · {evidence.classification_method}<br />
+                Review: {evidence.feedback.some(f => f.dimension === "stance" && f.approval === "approved") ? "Approved stance correction" : "Unreviewed prediction"}</p><p>{evidence.explanation}</p>
+              <p className={styles.hint}>{evidence.passage_kind === "extracted article passage" ? "Passage selected from stored article text; inspect surrounding context. Extraction is heuristic and may omit content." : "A search snippet is not a full-source passage."} Ranking reflects relevance, not truth or probability. Source dates are unverified publisher/provider metadata. Sufficiency is assessed separately.</p>
               <div className={styles.row}><span>Does it address the assertion?</span>{["relevant", "irrelevant"].map(label => <button className={styles.secondary} key={label} disabled={busy} onClick={() => act(() => submitFeedback(evidence, "relevance", label))}>{label}</button>)}</div>
               <label>Propose a stance correction<select value="" disabled={busy} onChange={event => { if (event.target.value) act(() => submitFeedback(evidence, "stance", event.target.value)); }}><option value="">Choose a proposed stance…</option>{["supporting", "contradicting", "unrelated", "needing review"].map(s => <option key={s}>{s}</option>)}</select></label>
               {evidence.feedback.map(f => <small className={styles.feedback} key={f.id}>{f.dimension}: {f.label} — {f.approval}</small>)}

@@ -12,7 +12,8 @@ def update_assessments(db, claim_id):
     for assertion in rows(db, 'SELECT id FROM assertions WHERE claim_id=?', (claim_id,)):
         evidence = rows(db, '''SELECT e.id, d.predicted_stance FROM evidence_items e
                             JOIN evidence_details d ON d.evidence_id=e.id WHERE assertion_id=?''', (assertion['id'],))
-        result, explanation = assess([effective_stance(db, e['id'], e['predicted_stance']) for e in evidence])
+        # Sufficiency uses reviewed source stances, never unreviewed classifier predictions.
+        result, explanation = assess([effective_stance(db, e['id'], 'needing review') for e in evidence])
         db.execute('UPDATE assertion_details SET assessment=?, explanation=? WHERE assertion_id=?', (result, explanation, assertion['id']))
 
 

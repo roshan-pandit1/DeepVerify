@@ -20,6 +20,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv('INVESTIGATION_ARTIFACTS', str(tmp_path / 'artifacts'))
     monkeypatch.setenv('INVESTIGATION_ADMIN_TOKEN', 'test-administrator-token-at-least-24')
     monkeypatch.delenv('SERPAPI_API_KEY', raising=False)
+    monkeypatch.setenv('SOURCE_EXTRACTION_PROVIDER', 'snippets-only')
     with TestClient(app) as client:
         yield client
 
@@ -45,7 +46,7 @@ def test_invalid_input(client, text):
     assert client.post('/api/investigations', json={'text': text}).status_code == 422
 
 
-@pytest.mark.parametrize('url', ['file:///etc/passwd', 'http://127.0.0.1', 'http://169.254.169.254/', 'http://[::1]/', 'https://user:pass@example.com', 'http://example.com:8080/'])
+@pytest.mark.parametrize('url', ['file:///etc/passwd', 'http://127.0.0.1', 'http://169.254.169.254/', 'http://[::1]/', 'http://224.0.0.1/', 'http://[ff02::1]/', 'http://192.0.2.1/', 'https://user:pass@example.com', 'http://example.com:8080/'])
 def test_private_urls_blocked(url):
     with pytest.raises(ValueError):
         destination(url)
@@ -93,7 +94,8 @@ def test_association_dedup_and_edits(client, monkeypatch):
         assert len(assertion['evidence']) == 1
         assert assertion['evidence'][0]['assertion_id'] == assertion['id']
     assert result['assertions'][0]['evidence'][0]['predicted_stance'] == 'needing review'
-    assert result['assertions'][1]['evidence'][0]['predicted_stance'] == 'unrelated'
+    assert result['assertions'][1]['evidence'][0]['predicted_stance'] == 'needing review'
+    assert 'entities' in result['assertions'][1]['evidence'][0]['explanation']
     assert client.put(f"/api/investigations/{item['claim_id']}/assertions", json={'assertions': texts}).status_code == 409
 
 

@@ -2,20 +2,23 @@
 import argparse
 import json
 import time
+import os
 
-from . import retrieval
+from . import retrieval, sources, budgets
 from .ranking import features, score
 from .review import update_assessments
-from .stance import classify
+from .stance import classifier
 from .store import connect, migrate, now, uid, rows, audit
 
 LEASE_SECONDS = 120
 
 
-def reserve():
+def reserve(run_id=None):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        job = db.execute("SELECT * FROM investigation_jobs WHERE state='queued' OR (state='running' AND lease_until < ?) ORDER BY rowid LIMIT 1", (time.time(),)).fetchone()
+        job = db.execute("""SELECT * FROM investigation_jobs WHERE (state='queued' OR (state='running' AND lease_until < ?))
+                            AND (? IS NULL OR claim_id IN (SELECT claim_id FROM pilot_jobs WHERE run_id=?)) ORDER BY rowid LIMIT 1""",
+                         (time.time(), run_id, run_id)).fetchone()
         if not job:
             return None
         owner = uid()
@@ -29,11 +32,14 @@ def owned(db, claim_id, owner):
     return db.execute("SELECT 1 FROM investigation_jobs WHERE claim_id=? AND owner=? AND state='running'", (claim_id, owner)).fetchone()
 
 
-def run_once():
-    job = reserve()
+def run_once(run_id=None):
+    with connect() as db:
+        db.execute('INSERT OR REPLACE INTO worker_observations VALUES (?,?,?)', (str(os.getpid()), now(), 'worker iteration observed; not proof of continuous liveness'))
+    job = reserve(run_id)
     if not job:
         return False
     claim_id, owner = job
+    limits = budgets.policy(claim_id)
     with connect() as db:
         assertions = rows(db, 'SELECT * FROM assertions WHERE claim_id=? ORDER BY rowid', (claim_id,))
         provider_name = db.execute('SELECT provider FROM investigations WHERE claim_id=?', (claim_id,)).fetchone()['provider']
@@ -49,14 +55,35 @@ def run_once():
             db.execute('UPDATE investigation_jobs SET lease_until=? WHERE claim_id=?', (time.time() + LEASE_SECONDS, claim_id))
             db.execute('INSERT INTO searches VALUES (?,?,?,?,?,?,?,?)', (search_id, claim_id, assertion['id'], assertion['assertion_text'], provider_name, now(), 'running', None))
         try:
-            results = retrieval.provider(provider_name).search(assertion['assertion_text'])
+            if limits:
+                budgets.reserve(limits['run_id'], 'search', search_id)
+            started = time.monotonic()
+            try:
+                results = retrieval.provider(provider_name).search(assertion['assertion_text'])
+            finally:
+                with connect() as db:
+                    db.execute('INSERT OR REPLACE INTO search_observations VALUES (?,?)', (search_id, int((time.monotonic() - started) * 1000)))
+            if limits:
+                results = results[:limits['max_sources']]
             prepared, seen = [], set()
             for item in results:
                 url = retrieval.canonical(item['url'])
                 if url in seen:
                     continue
                 seen.add(url)
-                prepared.append((item, url))
+                # Each bounded fetch renews the lease; never hold a DB transaction over network IO.
+                with connect() as db:
+                    if not owned(db, claim_id, owner):
+                        return True
+                    db.execute('UPDATE investigation_jobs SET lease_until=? WHERE claim_id=? AND owner=?',
+                               (time.time() + LEASE_SECONDS, claim_id, owner))
+                unavailable = None
+                if limits and not item['fixture']:
+                    try:
+                        budgets.reserve(limits['run_id'], 'source', url)
+                    except retrieval.Unavailable as exc:
+                        unavailable = str(exc)
+                prepared.append((sources.enrich(item, assertion['assertion_text'], unavailable), url))
             with connect() as db:
                 db.execute('BEGIN IMMEDIATE')
                 if not owned(db, claim_id, owner):
@@ -69,12 +96,13 @@ def run_once():
                     evidence_id = uid()
                     x = features(assertion['assertion_text'], item['passage'], item['publication_date'])
                     rank, ranker = score(x, active)
-                    stance, explanation = classify(assertion['assertion_text'], item['passage'])
+                    classification = classifier().classify(assertion['assertion_text'], item['passage'], item['context'])
                     db.execute('INSERT INTO evidence_items VALUES (?,?,?,?,?,?,?,?)',
                                (evidence_id, assertion['id'], item['title'], item['url'], item['passage'], 'NEUTRAL', 0.0, now()))
                     db.execute('INSERT INTO evidence_details VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                                (evidence_id, url, item['publication_date'], item['method'], item['kind'], rank,
-                                stance, 'conservative-lexical-triage-v1', explanation, int(item['fixture']), ranker, json.dumps(x)))
+                                classification['stance'], classification['method'], classification['explanation'], int(item['fixture']), ranker, json.dumps(x)))
+                    sources.persist(db, evidence_id, assertion['id'], item)
                 db.execute("UPDATE searches SET state='complete', retrieved_at=? WHERE id=?", (now(), search_id))
                 update_assessments(db, claim_id)
                 audit(db, claim_id, 'retrieval', f"Assertion {assertion['id']}: {len(prepared)} distinct source URLs; {provider_name}")
@@ -105,11 +133,12 @@ def run_once():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--once', action='store_true')
+    parser.add_argument('--run-id', help='Only process jobs belonging to this bounded pilot/validation run')
     args = parser.parse_args()
     migrate()
     if args.once:
-        run_once()
+        run_once(args.run_id)
     else:
         while True:
-            if not run_once():
+            if not run_once(args.run_id):
                 time.sleep(2)
