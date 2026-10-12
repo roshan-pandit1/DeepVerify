@@ -6,7 +6,7 @@ from . import splitting
 from .store import connect, rows, now, uid
 
 FORMAT = 'reviewed-investigation-v1'
-CATEGORIES = {'supported', 'contradicted', 'mixed', 'time-sensitive', 'insufficient', 'relevant-not-entailing', 'duplicate-syndicated'}
+CATEGORIES = {'supported', 'contradicted', 'mixed', 'time-sensitive', 'insufficient', 'relevant-not-entailing', 'duplicate-syndicated', 'temporal-mismatch', 'entity-mismatch', 'quotation', 'qualification'}
 LABELS = {'relevance': {'relevant', 'irrelevant'}, 'stance': {'supporting', 'contradicting', 'unrelated', 'needing review'},
           'sufficiency': {'sufficient', 'insufficient'}, 'citation': {'justified', 'not justified', 'needs review'}}
 
@@ -62,10 +62,12 @@ def add(identifier, assertion_id, related_group, temporal_context, categories):
         identifier_case = uid()
         db.execute('INSERT INTO evaluation_cases VALUES (?,?,?,?,?,?,?,?,?)',
                    (identifier_case, identifier, assertion_id, related_group.strip().lower(), temporal_context, json.dumps(categories), json.dumps(snapshot), None, None))
+        if db.execute('SELECT 1 FROM pilot_dataset_policies WHERE dataset_id=?', (identifier,)).fetchone():
+            db.execute('INSERT INTO pilot_case_policies VALUES (?,1)', (identifier_case,))
     return identifier_case
 
 
-def label(case_id, target, dimension, value, reviewer, status, reason):
+def label(case_id, target, dimension, value, reviewer, status, reason, adjudication_id=None):
     if dimension not in LABELS or value not in LABELS[dimension] or status not in {'proposed', 'approved', 'rejected'}:
         raise ValueError('Invalid label, dimension, or approval status')
     if not reviewer.strip() or len(reason.strip()) < 5:
@@ -80,6 +82,9 @@ def label(case_id, target, dimension, value, reviewer, status, reason):
         allowed = {e['id'] for e in snapshot['evidence']}
         if (dimension == 'sufficiency' and target != '') or (dimension != 'sufficiency' and target not in allowed):
             raise ValueError('Sufficiency targets the assertion (empty target); other dimensions target a captured evidence ID')
+        if status == 'approved':
+            from .independent_review import check_approval
+            check_approval(db, case_id, target, dimension, value, adjudication_id)
         if status in {'approved', 'rejected'}:
             db.execute("UPDATE evaluation_labels SET status='superseded' WHERE case_id=? AND target=? AND dimension=? AND status='approved'", (case_id, target, dimension))
         db.execute('INSERT INTO evaluation_labels VALUES (?,?,?,?,?,?,?,?,?)',
@@ -93,6 +98,12 @@ def snapshot(db, identifier):
         c['snapshot'] = json.loads(c.pop('snapshot_json'))
         c['categories'] = json.loads(c['categories'])
         c['reviews'] = rows(db, 'SELECT * FROM evaluation_labels WHERE case_id=? ORDER BY created_at, id', (c['id'],))
+        policy = db.execute('SELECT required_reviewers FROM pilot_case_policies WHERE case_id=?', (c['id'],)).fetchone()
+        if policy:
+            # Optional metadata only for new pilot cases. Historical frozen hashes stay unchanged.
+            c['independent_review'] = {'required_reviewers': policy[0],
+                'opinions': rows(db, 'SELECT * FROM independent_reviews WHERE case_id=? ORDER BY created_at,id', (c['id'],)),
+                'adjudications': rows(db, 'SELECT * FROM review_adjudications WHERE case_id=? ORDER BY created_at,id', (c['id'],))}
     return {'dataset': dataset, 'split_method': splitting.VERSION, 'cases': cases}
 
 
@@ -107,6 +118,9 @@ def freeze(identifier):
         data = snapshot(db, identifier)
         if not data['cases']:
             raise ValueError('Cannot freeze an empty dataset; evaluation pending human review')
+        if db.execute('SELECT 1 FROM pilot_dataset_policies WHERE dataset_id=?', (identifier,)).fetchone():
+            from .independent_review import validate_freeze
+            validate_freeze(db, data['cases'])
         for c in data['cases']:
             if approved(c, '', 'sufficiency') is None:
                 raise ValueError('Every assertion requires separately approved sufficiency labels')

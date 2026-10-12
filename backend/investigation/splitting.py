@@ -18,6 +18,8 @@ def links(case):
     if case.get('related_group'):
         keys.add(('topic', case['related_group'].strip().lower()))
     for e in snapshot.get('evidence', []):
+        if e.get('source_group_id'):
+            keys.add(('source_group', e['source_group_id']))
         source = e.get('source') or {}
         for url in (e.get('canonical_url'), source.get('final_url')):
             if url:

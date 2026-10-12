@@ -12,7 +12,7 @@ from .stance import GuardedRules, LegacyRules, VERSION as STANCE_VERSION
 from .sources import VERSION as EXTRACTION_VERSION
 from .store import connect, migrate, rows, now, uid
 
-VERSION = 'stage-evaluation-v1'
+VERSION = 'stage-evaluation-v2'
 
 
 def classification(truth, predictions, labels):
@@ -64,7 +64,10 @@ def report(data, partition, model_id='baseline-v1'):
     b = training.metrics(judged, indices, baseline) if judged else None
     candidate = training.metrics(judged, indices, scorer) if judged else None
     example_ids = [r['feedback_id'] for r in judged]
-    eligible = bool(b and candidate and training.eligible_metrics(b, candidate) and not data['dataset']['synthetic'])
+    from .comparison import compare
+    paired = compare(judged, scorer, {c['assertion_id']: c['component'] for c in cases},
+                     {c['assertion_id']: c['categories'] for c in cases}, data['dataset']['seed'])
+    eligible = bool(b and candidate and training.eligible_metrics(b, candidate) and paired['improvement_demonstrated'] and not data['dataset']['synthetic'])
     actual, guarded, legacy, extraction, citation = [], [], [], [], []
     sufficient_truth, sufficiency_predicted = [], []
     for c in cases:
@@ -99,7 +102,16 @@ def report(data, partition, model_id='baseline-v1'):
                         'baseline': b, 'candidate': candidate, 'identical_example_ids': example_ids,
                         'example_fingerprint': datasets.digest(example_ids), 'excluded_short_queries': len(counts) - len(qualified),
                         'label_distribution': dict(Counter(r['label'] for r in judged)),
-                        'promotion_gate_passed': eligible, 'gate_partition': 'validation only'},
+                        'promotion_gate_passed': eligible, 'gate_partition': 'validation only',
+                        'short_query_policy': 'Queries with fewer than five judged retrieved results are excluded from P@5/NDCG@5; excluded counts are explicit. Other stages still include them.',
+                        'paired_comparison': paired},
+            'coverage': {'assertions': len(cases), 'assessed': sum(c['snapshot']['assessment'] != 'insufficient evidence' for c in cases),
+                         'abstained_insufficient': sum(c['snapshot']['assessment'] == 'insufficient evidence' for c in cases),
+                         'needs_review_passages': guarded.count('needing review')},
+            'accuracy_status': 'measured on approved labels' if cases else 'not measured',
+            'review_provenance': {'independent_protocol_cases': sum('independent_review' in c for c in cases),
+                                 'double_reviewed_cases': sum(c.get('independent_review', {}).get('required_reviewers', 0) >= 2 for c in cases),
+                                 'legacy_approved_cases': sum('independent_review' not in c for c in cases)},
             'stance': {'baseline': classification(actual, legacy, stance_labels),
                        'candidate': classification(actual, guarded, stance_labels)},
             'extraction': {'source_candidates': len(extraction), 'attempts': len(attempted), 'successes': extraction.count('extracted'),
@@ -155,6 +167,11 @@ def evaluate(identifier, model_id='baseline-v1', partition='validation'):
             lock = db.execute('SELECT * FROM evaluation_holdout_locks WHERE dataset_id=?', (identifier,)).fetchone()
             if lock:
                 if lock['model_hash'] != audit_key:
+                    # Old final audits are immutable. Return the historical report for the same
+                    # model artifact, rather than rerunning it under new metric implementations.
+                    old = db.execute('SELECT report_json FROM evaluation_reports WHERE id=?', (lock['report_id'],)).fetchone()
+                    if old and json.loads(old['report_json']).get('model_hash') == model_hash:
+                        return json.loads(old['report_json'])
                     raise ValueError('Frozen holdout already consumed by another model/method. Do not tune against or reuse it.')
                 old = db.execute('SELECT report_json FROM evaluation_reports WHERE id=?', (lock['report_id'],)).fetchone()
                 if not old:

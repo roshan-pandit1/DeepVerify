@@ -1,4 +1,5 @@
 import os
+import logging
 from typing import Protocol
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
@@ -27,6 +28,9 @@ class SerpAPI:
         if not key:
             raise Unavailable('SERPAPI_API_KEY is missing. Configure it or create an explicitly offline investigation.')
         try:
+            # HTTPX informational request logs include URL query credentials. Never emit those.
+            logging.getLogger('httpx').setLevel(logging.WARNING)
+            logging.getLogger('httpcore').setLevel(logging.WARNING)
             with httpx.Client(timeout=12, trust_env=False) as client:
                 response = client.get('https://serpapi.com/search.json', params={
                     'engine': 'google', 'q': query, 'num': 10, 'api_key': key})

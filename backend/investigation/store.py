@@ -111,9 +111,43 @@ def migrate():
         CREATE TABLE IF NOT EXISTS evaluation_holdout_locks (
           dataset_id TEXT PRIMARY KEY REFERENCES evaluation_datasets(id), model_hash TEXT NOT NULL,
           report_id TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS pilot_runs (
+          id TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at TEXT NOT NULL, specification TEXT NOT NULL,
+          max_searches INTEGER NOT NULL, max_sources INTEGER NOT NULL, unit_cost REAL NOT NULL, max_cost REAL NOT NULL,
+          status TEXT NOT NULL, dataset_id TEXT REFERENCES evaluation_datasets(id));
+        CREATE TABLE IF NOT EXISTS pilot_jobs (
+          claim_id TEXT PRIMARY KEY REFERENCES claims(id), run_id TEXT NOT NULL REFERENCES pilot_runs(id),
+          plan_json TEXT NOT NULL, max_sources INTEGER NOT NULL, case_id TEXT REFERENCES evaluation_cases(id));
+        CREATE TABLE IF NOT EXISTS pilot_requests (
+          id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES pilot_runs(id), kind TEXT NOT NULL,
+          reference TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS search_observations (
+          search_id TEXT PRIMARY KEY REFERENCES searches(id), latency_ms INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS source_observations (
+          source_id TEXT PRIMARY KEY REFERENCES source_documents(id), latency_ms INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS worker_observations (
+          worker_id TEXT PRIMARY KEY, observed_at TEXT NOT NULL, mode TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS pilot_dataset_policies (
+          dataset_id TEXT PRIMARY KEY REFERENCES evaluation_datasets(id), protocol TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS pilot_case_policies (
+          case_id TEXT PRIMARY KEY REFERENCES evaluation_cases(id), required_reviewers INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS independent_reviews (
+          id TEXT PRIMARY KEY, case_id TEXT NOT NULL REFERENCES evaluation_cases(id), target TEXT NOT NULL,
+          dimension TEXT NOT NULL, label TEXT NOT NULL, reviewer TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS review_adjudications (
+          id TEXT PRIMARY KEY, case_id TEXT NOT NULL REFERENCES evaluation_cases(id), target TEXT NOT NULL,
+          dimension TEXT NOT NULL, label TEXT NOT NULL, adjudicator TEXT NOT NULL, reason TEXT NOT NULL,
+          reviews_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS failure_observations (
+          id TEXT PRIMARY KEY, case_id TEXT NOT NULL REFERENCES evaluation_cases(id), target TEXT NOT NULL,
+          kind TEXT NOT NULL, detail TEXT NOT NULL, reviewer TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS failure_observation_reviews (
+          id TEXT PRIMARY KEY, observation_id TEXT NOT NULL REFERENCES failure_observations(id), decision TEXT NOT NULL,
+          reviewer TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
         ''')
         db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (1, ?)', (now(),))
         db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (2, ?)', (now(),))
+        db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (3, ?)', (now(),))
 
 
 def audit(db, claim_id, stage, output):
@@ -127,4 +161,4 @@ def rows(db, sql, args=()):
 
 if __name__ == '__main__':
     migrate()
-    print('Additive investigation migrations through 2 applied; existing records preserved.')
+    print('Additive investigation migrations through 3 applied; existing records preserved.')

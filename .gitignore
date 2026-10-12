@@ -17,6 +17,10 @@ backend/backend.log
 *.db
 *.sqlite
 *.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
 
 # Large Media Files
 *.mp4
@@ -37,5 +41,6 @@ Thumbs.db
 .venv/
 .pytest_cache/
 backend/investigation-data/
+investigation-data/
 *.cookies.txt
 frontend/.env.production.local

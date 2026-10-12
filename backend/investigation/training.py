@@ -207,9 +207,21 @@ def evaluate(model_id):
         raise ValueError('Invalid candidate coefficients')
     candidate = lambda x: sum(a * b for a, b in zip(x, model['coefficients'])) + model['intercept']
     base, result = metrics(data, test_ids, baseline), metrics(data, test_ids, candidate)
+    from .comparison import compare
+    from .splitting import components
+    wrapped = [{'id': r['feedback_id'], 'snapshot': {'claim_id': r['claim_id'], 'assertion_text': r['assertion_text'],
+                'evidence': [{'canonical_url': r['canonical_url'], 'content_snippet': r['content_snippet'], 'source': r.get('source')}]}} for r in data]
+    membership = {}
+    by_id = {r['feedback_id']: r['assertion_id'] for r in data}
+    for group in components(wrapped):
+        component = digest(sorted(c['id'] for c in group))
+        for c in group:
+            membership[by_id[c['id']]] = component
+    paired = compare([data[i] for i in test_ids], candidate, membership, {}, 17)
     report = {'model_id': model_id, 'model_hash': digest(model), 'dataset_id': model['dataset_id'],
               'evaluated_at': now(), 'groups': groups, 'train_examples': len(train_ids),
-              'baseline': base, 'candidate': result, 'eligible': eligible_metrics(base, result),
+              'baseline': base, 'candidate': result, 'eligible': eligible_metrics(base, result) and paired['improvement_demonstrated'],
+              'paired_comparison': paired,
               'partition': 'validation', 'holdout_used': False,
               'limitations': 'Reviewed relevance only; lexical grouping can miss paraphrases. This legacy split is validation, not a frozen final holdout. No stance training; reserved evaluation groups are excluded.'}
     write(f'{model_id}.evaluation.json', report)

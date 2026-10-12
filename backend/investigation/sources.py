@@ -5,6 +5,7 @@ import json
 import os
 import re
 import socket
+import time
 from typing import Protocol
 
 from bs4 import BeautifulSoup
@@ -116,11 +117,14 @@ def select_passage(text, assertion):
             'context': text[context_start:context_end], 'context_start': context_start, 'context_end': context_end}
 
 
-def enrich(item, assertion):
+def enrich(item, assertion, unavailable_reason=None):
+    started = time.monotonic()
     source = {'id': uid(), 'source_url': item['url'], 'final_url': item['url'], 'retrieved_at': now(),
               'method': VERSION, 'status': 'unavailable', 'title': item['title'], 'main_text': '',
               'publication_date': None, 'date_method': None, 'content_hash': None, 'body_hash': None, 'error': None}
     try:
+        if unavailable_reason:
+            raise FetchFailure('budget_exhausted', unavailable_reason)
         if item['fixture']:
             raise FetchFailure('offline', 'Offline fixture: no live source fetch was attempted.')
         fetcher = provider()
@@ -128,7 +132,7 @@ def enrich(item, assertion):
         source.update(fetcher.fetch(item['url']))
         source['retrieved_at'] = now()
         selected = select_passage(source['main_text'], assertion)
-        return {**item, **selected, 'title': source['title'], 'publication_date': source['publication_date'],
+        return {**item, **selected, 'latency_ms': int((time.monotonic() - started) * 1000), 'title': source['title'], 'publication_date': source['publication_date'],
                 'kind': 'extracted article passage', 'source': source, 'search_snippet': item['passage']}
     except (FetchFailure, OSError, http.client.HTTPException, ValueError, TypeError) as exc:
         category = exc.category if isinstance(exc, FetchFailure) else 'timeout' if isinstance(exc, (socket.timeout, TimeoutError)) else 'fetch_failed'
@@ -136,7 +140,7 @@ def enrich(item, assertion):
         source['retrieved_at'] = now()
         if isinstance(exc, FetchFailure) and exc.final_url:
             source['final_url'] = exc.final_url
-        return {**item, 'kind': item['kind'] if item['fixture'] else 'search snippet fallback', 'source': source,
+        return {**item, 'latency_ms': int((time.monotonic() - started) * 1000), 'kind': item['kind'] if item['fixture'] else 'search snippet fallback', 'source': source,
                 'search_snippet': item['passage'], 'context': '', 'start_offset': None, 'end_offset': None,
                 'context_start': None, 'context_end': None}
 
@@ -149,3 +153,4 @@ def persist(db, evidence_id, assertion_id, item):
     db.execute('INSERT INTO source_passages VALUES (?,?,?,?,?,?,?,?,?,?)',
                (evidence_id, s['id'], assertion_id, item['start_offset'], item['end_offset'],
                 item['context'], item['context_start'], item['context_end'], item['search_snippet'], PASSAGE_VERSION))
+    db.execute('INSERT INTO source_observations VALUES (?,?)', (s['id'], item.get('latency_ms', 0)))
