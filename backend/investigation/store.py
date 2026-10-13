@@ -119,6 +119,10 @@ def migrate():
         CREATE TABLE IF NOT EXISTS pilot_requests (
           id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES pilot_runs(id), kind TEXT NOT NULL,
           reference TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS workspace_policy (singleton INTEGER PRIMARY KEY CHECK(singleton=1), policy_json TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS workspace_events (id TEXT PRIMARY KEY, kind TEXT NOT NULL, occurred REAL NOT NULL, cost_microusd INTEGER NOT NULL, reference TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS workspace_event_window ON workspace_events(kind, occurred);
+        CREATE TABLE IF NOT EXISTS workspace_request_leases (id TEXT PRIMARY KEY, expires REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS search_result_failures (
           id TEXT PRIMARY KEY, search_id TEXT NOT NULL REFERENCES searches(id),
           result_index INTEGER NOT NULL, category TEXT NOT NULL, incident TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -150,6 +154,9 @@ def migrate():
         db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (2, ?)', (now(),))
         db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (3, ?)', (now(),))
         db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (4, ?)', (now(),))
+        db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (5, ?)', (now(),))
+        from .controls import environment_policy
+        db.execute('INSERT OR IGNORE INTO workspace_policy VALUES (1,?)', (json.dumps(environment_policy(), sort_keys=True),))
 
 
 def audit(db, claim_id, stage, output):
@@ -163,4 +170,4 @@ def rows(db, sql, args=()):
 
 if __name__ == '__main__':
     migrate()
-    print('Additive investigation migrations through 4 applied; existing records preserved.')
+    print('Additive investigation migrations through 5 applied; existing records preserved.')

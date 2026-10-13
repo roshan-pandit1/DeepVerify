@@ -4,7 +4,7 @@ import json
 import time
 import os
 
-from . import retrieval, sources, budgets, diagnostics
+from . import retrieval, sources, budgets, diagnostics, controls
 from .ranking import features, score
 from .review import update_assessments
 from .stance import classifier
@@ -16,6 +16,10 @@ LEASE_SECONDS = 120
 def reserve(run_id=None):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
+        limits = controls.policy(db)
+        running = db.execute("SELECT COUNT(*) FROM investigation_jobs WHERE state='running' AND lease_until>?", (time.time(),)).fetchone()[0]
+        if running >= limits['workers']:
+            return None
         job = db.execute("""SELECT * FROM investigation_jobs WHERE (state='queued' OR (state='running' AND lease_until < ?))
                             AND (? IS NULL OR claim_id IN (SELECT claim_id FROM pilot_jobs WHERE run_id=?)) ORDER BY rowid LIMIT 1""",
                          (time.time(), run_id, run_id)).fetchone()
@@ -42,6 +46,7 @@ def run_once(run_id=None):
     limits = budgets.policy(claim_id)
     with connect() as db:
         assertions = rows(db, 'SELECT * FROM assertions WHERE claim_id=? ORDER BY rowid', (claim_id,))
+        workspace_limits = controls.policy(db)
         provider_name = db.execute('SELECT provider FROM investigations WHERE claim_id=?', (claim_id,)).fetchone()['provider']
     for assertion in assertions:
         search_id = uid()
@@ -55,8 +60,12 @@ def run_once(run_id=None):
             db.execute('UPDATE investigation_jobs SET lease_until=? WHERE claim_id=?', (time.time() + LEASE_SECONDS, claim_id))
             db.execute('INSERT INTO searches VALUES (?,?,?,?,?,?,?,?)', (search_id, claim_id, assertion['id'], assertion['assertion_text'], provider_name, now(), 'running', None))
         try:
+            if len(assertions) > workspace_limits['assertions'] or len(assertion['assertion_text']) > workspace_limits['assertion_chars']:
+                raise controls.LimitExceeded('Stored assertions exceed the configured workspace input limits. Create a shorter investigation.', 422)
             if limits:
                 budgets.reserve(limits['run_id'], 'search', search_id)
+            if provider_name != 'offline':
+                controls.reserve_external('search', claim_id, owner)
             started = time.monotonic()
             try:
                 results = retrieval.provider(provider_name).search(assertion['assertion_text'])
@@ -167,6 +176,7 @@ if __name__ == '__main__':
     from .runtime import validate_storage
     validate_storage()
     migrate()
+    controls.initialize()
     if args.once:
         run_once(args.run_id)
     else:

@@ -166,6 +166,8 @@ def start_run(kind, spec, token, execute=False, max_searches=4, per_query_source
     run_id = uid()
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
+        from .controls import queue_capacity
+        queue_capacity(db, len(plans))
         db.execute('INSERT INTO pilot_runs VALUES (?,?,?,?,?,?,?,?,?,?)',
                    (run_id, kind, now(), json.dumps(spec), max_searches, max_searches * per_query_sources + (1 if kind == 'live-validation' else 0), unit_cost, max_cost, 'queued', dataset_id))
         for p in plans:

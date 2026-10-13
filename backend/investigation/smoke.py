@@ -43,7 +43,8 @@ def run(with_frontend=False):
         token = secrets.token_urlsafe(32)
         env = dict(os.environ, INVESTIGATION_DB=directory + '/synthetic.db', INVESTIGATION_ARTIFACTS=directory + '/artifacts',
                    INVESTIGATION_ADMIN_TOKEN=token, SERPAPI_API_KEY='', INVESTIGATION_DEPLOYMENT='local',
-                   DEEPVERIFY_PYTHON=sys.executable)
+                   DEEPVERIFY_PYTHON=sys.executable, INVESTIGATION_ALLOWED_HOSTS='localhost,127.0.0.1,::1',
+                   INVESTIGATION_SEARCH_UNIT_COST_USD='0', FRONTEND_URL='http://localhost:3000')
         api_port = unused_port()
         processes = []
         with open(directory + '/servers.log', 'w') as log:

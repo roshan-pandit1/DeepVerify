@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 
 from .ingestion import fetch_document, FetchFailure
 from .ranking import tokens
+from .retrieval import Unavailable
 from .store import now, uid
 
 VERSION = 'article-dom-v1'
@@ -129,14 +130,17 @@ def enrich(item, assertion, unavailable_reason=None):
             raise FetchFailure('offline', 'Offline fixture: no live source fetch was attempted.')
         fetcher = provider()
         source['method'] = fetcher.version
+        if isinstance(fetcher, PublicArticle):
+            from .controls import reserve_external
+            reserve_external('source')
         source.update(fetcher.fetch(item['url']))
         source['retrieved_at'] = now()
         selected = select_passage(source['main_text'], assertion)
         return {**item, **selected, 'latency_ms': int((time.monotonic() - started) * 1000), 'title': source['title'], 'publication_date': source['publication_date'],
                 'kind': 'extracted article passage', 'source': source, 'search_snippet': item['passage']}
-    except (FetchFailure, OSError, http.client.HTTPException, ValueError, TypeError) as exc:
-        category = exc.category if isinstance(exc, FetchFailure) else 'timeout' if isinstance(exc, (socket.timeout, TimeoutError)) else 'fetch_failed'
-        source.update(status=category, error=str(exc) if isinstance(exc, FetchFailure) else 'Source fetch/extraction failed; search snippet retained.')
+    except (FetchFailure, Unavailable, OSError, http.client.HTTPException, ValueError, TypeError) as exc:
+        category = 'budget_exhausted' if isinstance(exc, Unavailable) else exc.category if isinstance(exc, FetchFailure) else 'timeout' if isinstance(exc, (socket.timeout, TimeoutError)) else 'fetch_failed'
+        source.update(status=category, error=str(exc) if isinstance(exc, (FetchFailure, Unavailable)) else 'Source fetch/extraction failed; search snippet retained.')
         source['retrieved_at'] = now()
         if isinstance(exc, FetchFailure) and exc.final_url:
             source['final_url'] = exc.final_url

@@ -140,3 +140,33 @@ in `/tmp/deepverify-root-install` passed (**2 packages**), preserving the existi
 root installation. `git ls-files 'node_modules/**' '**/node_modules/**'` is empty;
 ignore checks and `git diff --check` passed. Frontend behavioral tests and the
 Webpack production build were rerun after the clean installation.
+
+## 9. Shared workspace boundary and budgets
+
+Revised the limitation into an enforced local/private deployment model, not
+multi-user ownership. Every route requires a loopback client or explicitly
+trusted private gateway peer + distinct server-side workspace token. Host and
+Origin allowlists are exact; spoofed forwarded headers are ignored. Admin tokens
+remain separate. Private configuration fails closed; the gateway itself remains
+an operator-provided deployment dependency.
+
+Additive migration 5 stores shared policy, request leases and conservative external
+request/cost reservations. API rate/submission/body/input/queue admission and
+worker concurrency/input/search/source/cost bounds use SQLite transactions. Daily
+caps are rolling windows with integer microdollar reservations; migrations,
+restarts and explicit policy reconfiguration preserve usage. Missing ordinary
+live price bounds disable paid execution. Pilot-specific budgets remain additional
+caps. Existing reports, evaluations, promotion gates and rollback are preserved.
+
+`cd backend && ../.venv/bin/python -m pytest investigation_tests -q`: **112 passed**.
+New tests cover authorization on reads/docs, Host/Origin/forwarded-header rejection,
+private gateway/admin separation, streamed-body bounds, cancellation cleanup,
+rate/queue/concurrency caps, queued-work budget recheck, honest snippet fallback,
+configuration mismatch and competing processes sharing worker/cost reservations.
+The actual bill still depends on the operator-supplied price estimate; no live
+search was issued by these tests. Gateway provisioning and real hosting remain
+unverified and were not attempted.
+
+The updated `../.venv/bin/python -m investigation.smoke` also **passed** with real
+loopback HTTP, queued API restart, separate worker, report/source retrieval and
+administrator allow/deny plus token-free log checks.

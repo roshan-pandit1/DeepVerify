@@ -5,13 +5,25 @@ import subprocess
 import sys
 
 import pytest
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient as BaseTestClient
 
 from investigation.api import app
 from investigation import worker, retrieval, training
 from investigation.ingestion import destination
 from investigation.ranking import baseline, score
 from investigation.store import connect, migrate
+
+
+class TestClient(BaseTestClient):
+    """Explicit loopback transport for old Starlette without a client= option."""
+    __test__ = False
+
+    def __init__(self, application):
+        async def loopback(scope, receive, send):
+            if scope['type'] == 'http':
+                scope = {**scope, 'client': ('127.0.0.1', 12345)}
+            await application(scope, receive, send)
+        super().__init__(loopback, base_url='http://127.0.0.1')
 
 
 @pytest.fixture
@@ -21,6 +33,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv('INVESTIGATION_ADMIN_TOKEN', 'test-administrator-token-at-least-24')
     monkeypatch.delenv('SERPAPI_API_KEY', raising=False)
     monkeypatch.setenv('SOURCE_EXTRACTION_PROVIDER', 'snippets-only')
+    monkeypatch.setenv('INVESTIGATION_DEPLOYMENT', 'local')
+    monkeypatch.setenv('INVESTIGATION_SEARCH_UNIT_COST_USD', '0.01')
     with TestClient(app) as client:
         yield client
 

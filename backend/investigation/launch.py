@@ -12,6 +12,8 @@ def main():
     args = parser.parse_args()
     try:
         validate_storage()
+        from .controls import validate_boundary
+        validate_boundary()
     except ValueError as exc:
         parser.exit(1, str(exc) + '\n')
     if args.role == 'worker':

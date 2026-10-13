@@ -31,7 +31,7 @@ Generate an administrator token and place it in `backend/.env` (never the fronte
 .venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))'
 ```
 
-`SERPAPI_API_KEY` enables live Google text search through the existing SerpAPI integration. No LLM, Brave, blockchain, Telegram, or media-model credentials are needed. Missing search credentials produce `unavailable` searches and an actionable partial report. Choosing **OFFLINE FIXTURES** explicitly uses fictional development evidence. It never falls back from live retrieval to fixtures, and fixtures are excluded from training.
+`SERPAPI_API_KEY`, together with an operator-configured `INVESTIGATION_SEARCH_UNIT_COST_USD` upper bound, enables live Google text search through the existing SerpAPI integration. No LLM, Brave, blockchain, Telegram, or media-model credentials are needed. With a configured cost bound, missing search credentials produce `unavailable` searches and an actionable partial report. Without a cost bound, queueing ordinary live searches is rejected explicitly. Choosing **OFFLINE FIXTURES** explicitly uses fictional development evidence. It never falls back from live retrieval to fixtures, and fixtures are excluded from training.
 
 `frontend/.env.local` must set `NEXT_PUBLIC_API_BASE_URL` to your API origin before building. If omitted, requests use the frontend origin (for an externally configured same-origin reverse proxy). There is no hard-coded API origin in the new interface. Set `FRONTEND_URL` to the frontend origin for CORS.
 
@@ -44,14 +44,14 @@ cd backend
 ../.venv/bin/python -m investigation.store
 ```
 
-This reuses `claims`, `assertions`, `evidence_items`, and `audit_log_entries` with their existing SQLAlchemy names and enum values. Additive migrations 1–3 create investigation, source, evaluation, budget-ledger, independent-review and provenance tables. Existing rows, dataset versions, frozen hashes/splits, feedback, memory, active ranker, and rollback history are preserved. Historical evidence is not silently refetched or reclassified. Only investigations created by the new pipeline appear in its history.
+This reuses `claims`, `assertions`, `evidence_items`, and `audit_log_entries` with their existing SQLAlchemy names and enum values. Additive migrations 1–5 create investigation, source, evaluation, budget-ledger, independent-review, provenance, per-result failure and shared-workspace control tables. Existing rows, dataset versions, frozen hashes/splits, feedback, memory, active ranker, and rollback history are preserved. Historical evidence is not silently refetched or reclassified. Only investigations created by the new pipeline appear in its history.
 
 In three terminals, from the repository root:
 
 **API**
 ```sh
 cd backend
-../.venv/bin/uvicorn investigation.api:app --host 127.0.0.1 --port 8000
+../.venv/bin/uvicorn investigation.api:app --host 127.0.0.1 --port 8000 --no-access-log --no-proxy-headers
 ```
 
 **Separate worker**
@@ -126,7 +126,7 @@ curl -sS -X POST "http://localhost:8000/api/admin/feedback/$FEEDBACK_ID/review" 
 
 Predictions are never overwritten by feedback. Approving a correction supersedes the previous approved label for that evidence/dimension and records both decisions. Revocations exclude labels from subsequent exports. Reviews and supersessions remain in `feedback_reviews`.
 
-Administration is an initial shared bearer token, minimum 24 characters, with a single `token-administrator` audit identity. It has no individual admin accounts, role separation, rate limiting, or key rotation service. Submission/history are shared local-workspace endpoints, not private multi-user accounts. Use the documented loopback binding; authenticated multi-user deployment is a later milestone. CLI tokens passed as arguments may be visible in local process listings. The CLI also requires local filesystem access; the token does not protect against someone who already controls the database files.
+Administration is an initial shared bearer token, minimum 24 characters, with a single `token-administrator` audit identity. It has no individual admin accounts, role separation, per-user quotas, or key rotation service. Shared SQLite-backed workspace limits apply to all callers. Submission/history are shared local-workspace endpoints, not private multi-user accounts. Loopback access is enforced in local mode; private mode requires the configured trusted gateway. Authenticated multi-user ownership is not implemented. CLI tokens passed as arguments may be visible in local process listings. The CLI also requires local filesystem access; the token does not protect against someone who already controls the database files.
 
 ## Reviewed ranking: export, train, evaluate, promote, roll back
 
@@ -460,3 +460,94 @@ No root application scripts were found, so the root package is preserved for
 compatibility rather than silently removed. Generated `node_modules/` directories
 are ignored at every depth and are not tracked. Run frontend commands from
 `frontend/`; its bundler/tracing root is explicitly that directory.
+
+## Shared workspace access and resource limits
+
+This is one trusted **shared workspace**. Every admitted participant can inspect
+all investigations, evidence, feedback, history and source reports. The shared
+administrator token grants review/evaluation administration, not per-user data
+ownership. Public multi-user hosting is unsupported.
+
+In default `INVESTIGATION_DEPLOYMENT=local` mode, the API rejects non-loopback
+socket peers even if accidentally bound on all interfaces. It accepts only exact
+configured Host headers and the single `FRONTEND_URL` Origin when supplied.
+Forwarded client headers do not grant access. All routes, including docs and reads,
+pass through this boundary before JSON parsing.
+
+Private hosting requires **all** of:
+
+- `INVESTIGATION_DEPLOYMENT=private`, explicit durable absolute database/artifact
+  paths, and identical limits/configuration for API, worker and administrative CLI.
+- An authenticated trusted private access gateway (VPN/access proxy), configured
+  outside this repository. Restrict the backend socket/firewall to that gateway.
+- Exact gateway socket-peer CIDRs in `INVESTIGATION_TRUSTED_PROXY_CIDRS` (private or
+  loopback networks), exact `INVESTIGATION_ALLOWED_HOSTS`, and one `FRONTEND_URL`.
+- A separate random `INVESTIGATION_WORKSPACE_TOKEN` of at least 32 characters.
+  The gateway strips any client-supplied `X-Workspace-Token` and injects its own
+  value in the upstream header after access authentication. Keep it server-side;
+  never put it in `NEXT_PUBLIC_*`, URLs, browser storage or gateway access logs.
+- A distinct `INVESTIGATION_ADMIN_TOKEN` of at least 24 characters for the existing
+  review desk. The workspace token never authorizes administrator operations.
+- A same-origin frontend/API gateway: leave `NEXT_PUBLIC_API_BASE_URL` empty before
+  building and route `/api` to the private backend. The browser does not send the
+  workspace token. Configure gateway HTTPS, request/body/time limits and disable
+  sensitive header/query logging. Direct cross-origin private API access without
+  that gateway is intentionally denied.
+
+Startup fails with actionable errors when private configuration is incomplete.
+The Compose example binds the host port to loopback and runs both services; it
+**does not install an authenticated gateway**. Set the actual Docker gateway peer
+CIDR rather than assuming the host loopback address is visible inside containers.
+No gateway, firewall, container or public service was provisioned by this work.
+
+Migration 5 stores the policy and usage in the existing SQLite database. API
+admission and worker reservations use `BEGIN IMMEDIATE` transactions, shared by
+all processes. Defaults (globally per workspace, not per user):
+
+| Environment setting | Default / meaning |
+| --- | --- |
+| `INVESTIGATION_LIMIT_REQUESTS_PER_MINUTE` | 300, rolling 60 seconds |
+| `INVESTIGATION_LIMIT_SUBMISSIONS_PER_HOUR` | 60, rolling hour |
+| `INVESTIGATION_LIMIT_QUEUE` | 100 queued + running jobs |
+| `INVESTIGATION_LIMIT_WORKERS` | 2 concurrently leased jobs |
+| `INVESTIGATION_LIMIT_ACTIVE_REQUESTS` | 8 admitted HTTP requests |
+| `INVESTIGATION_LIMIT_REQUEST_BYTES` | 65,536 before JSON parsing, including chunked bodies |
+| `INVESTIGATION_LIMIT_CLAIM_CHARS` | 12,000 (can be lowered) |
+| `INVESTIGATION_LIMIT_ASSERTIONS` | 20 (can be lowered) |
+| `INVESTIGATION_LIMIT_ASSERTION_CHARS` | 1,500 (can be lowered) |
+| `INVESTIGATION_LIMIT_SEARCHES_PER_DAY` | 100 paid attempts, rolling 24 hours |
+| `INVESTIGATION_LIMIT_SOURCES_PER_DAY` | 1,000 source-fetch attempts, rolling 24 hours; each may make at most 4 redirect requests |
+| `INVESTIGATION_SEARCH_UNIT_COST_USD` | 0: ordinary live search disabled until an upper price estimate is supplied |
+| `INVESTIGATION_DAILY_COST_USD` | 1 USD reserved cost, rolling 24 hours |
+
+Use the actual upper per-attempt price from your provider plan. The configured
+cost is **not a quoted price or actual billing measurement**. Cost reservations use
+integer microdollars, rounded upward; failed/crashed attempts are not refunded.
+Pilot runs retain their own stricter ledgers and explicit price bounds, and are
+also subject to workspace caps. The larger pilot/workspace per-search estimate
+is reserved. Offline fixtures consume no external-request budget. Source-fetch
+budget exhaustion retains explicitly labeled snippets without fetching sources.
+
+Rate/queue/concurrency/exhausted-budget rejections return HTTP 429; body overflow
+returns 413; missing live-cost configuration returns 503. The worker rechecks
+budget/input limits immediately before paid work, including previously queued
+jobs. Request bodies time out after 15 seconds and application requests after
+60 seconds; crashed request leases expire after 120 seconds. Worker leases retain
+the existing 120-second recovery and owner fencing. These are admitted-work
+bounds, not protection against arbitrary traffic exhausting a host's sockets;
+keep gateway/server limits in place. A disk outage still requires operator repair.
+
+On an existing database, changed policy environment values fail startup rather
+than silently installing different limits in each process. After reviewing the
+new values, a trusted filesystem administrator runs, from `backend/`:
+
+```sh
+../.venv/bin/python -m investigation.controls configure
+```
+
+This explicitly updates the shared policy **without resetting usage, jobs,
+feedback, evaluation data, model gates or rollback history**. Workers/API read
+that policy from SQLite. Restart services with matching environment values.
+Protect database/artifact files; their administrator remains trusted. The default
+launcher disables Uvicorn access logs and forwarded-header trust; no token values
+are recorded in application diagnostics.

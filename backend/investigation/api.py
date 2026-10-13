@@ -6,6 +6,9 @@ from typing import Literal
 
 from fastapi import FastAPI, Depends, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from . import controls
+from .boundary import WorkspaceBoundary
 from pydantic import BaseModel, Field, field_validator
 
 from .runtime import validate_storage
@@ -19,18 +22,26 @@ from .store import connect, migrate, now, uid, rows, audit
 @asynccontextmanager
 async def lifespan(app):
     validate_storage()
+    controls.validate_boundary()
     migrate()
+    controls.initialize()
     yield
 
 
 app = FastAPI(title='DeepVerify Investigation API', lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[os.getenv('FRONTEND_URL', 'http://localhost:3000')],
                    allow_methods=['GET', 'POST', 'PUT'], allow_headers=['Content-Type', 'Authorization'])
+app.add_middleware(WorkspaceBoundary)
+
+
+@app.exception_handler(controls.LimitExceeded)
+async def limit_error(request, exc):
+    return JSONResponse({'detail': str(exc)}, status_code=exc.status, headers={'Retry-After': '60'})
 
 
 def admin(authorization: str = Header(default='')):
     expected = os.getenv('INVESTIGATION_ADMIN_TOKEN', '')
-    if len(expected) < 24 or not hmac.compare_digest(authorization, 'Bearer ' + expected):
+    if len(expected) < 24 or not controls.token_equal(authorization, 'Bearer ' + expected):
         raise HTTPException(403, 'Administrator token required (configured token must be at least 24 characters).')
     return 'token-administrator'
 
@@ -87,9 +98,16 @@ def add_assertions(db, claim_id, texts):
 
 @app.post('/api/investigations', status_code=201)
 def create(body: Submission):
+    limits = controls.admit_submission()
+    if len(body.text) > limits['claim_chars']:
+        raise HTTPException(422, 'Input exceeds the configured claim character limit.')
+    if body.input_type == 'url':
+        controls.reserve_external('source')
     try:
         text = fetch_article(body.text) if body.input_type == 'url' else body.text
         assertions = extract(text)
+        if len(text) > limits['claim_chars'] or len(assertions) > limits['assertions'] or any(len(x) > limits['assertion_chars'] for x in assertions):
+            raise ValueError('Extracted assertions exceed the configured workspace input limits.')
     except (ValueError, OSError) as exc:
         raise HTTPException(422, str(exc)) from exc
     claim_id = uid()
@@ -134,6 +152,9 @@ def detail(claim_id: str):
 def edit(claim_id: str, body: Edits):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
+        limits = controls.policy(db)
+        if len(body.assertions) > limits['assertions'] or any(len(x) > limits['assertion_chars'] for x in body.assertions):
+            raise HTTPException(422, 'Assertions exceed the configured workspace input limits.')
         if require(db, claim_id)['stage'] != 'draft':
             raise HTTPException(409, 'Assertions are locked after retrieval starts. Create a new investigation to revise them.')
         db.execute('DELETE FROM assertion_details WHERE assertion_id IN (SELECT id FROM assertions WHERE claim_id=?)', (claim_id,))
@@ -150,6 +171,9 @@ def run(claim_id: str):
         db.execute('BEGIN IMMEDIATE')
         if require(db, claim_id)['stage'] not in ('draft', 'partial'):
             raise HTTPException(409, 'Already queued or completed. Create a new investigation to refresh completed research.')
+        controls.queue_capacity(db)
+        if require(db, claim_id)['provider'] == 'serpapi':
+            controls.check_external(db, 'search', controls.search_cost(db, claim_id))
         db.execute("INSERT INTO investigation_jobs(claim_id,state) VALUES (?,'queued') ON CONFLICT(claim_id) DO UPDATE SET state='queued', owner=NULL, lease_until=0", (claim_id,))
         db.execute("UPDATE investigations SET stage='queued', error=NULL WHERE claim_id=?", (claim_id,))
         audit(db, claim_id, 'queued', 'Waiting for the separate investigation worker.')
