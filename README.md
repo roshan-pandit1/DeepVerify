@@ -6,7 +6,7 @@ This repository includes investigation, source-quality evaluation, and milestone
 
 ## Setup
 
-Python 3.9+ and Node.js 20.9+ are required. From the repository root:
+Python 3.9+ and Node.js 22.22.2+ (22.x LTS) are supported for the full development/test setup. See frontend/package.json for other compatible Node versions. From the repository root:
 
 ```sh
 python3 -m venv .venv

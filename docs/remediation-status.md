@@ -105,3 +105,24 @@ raw exception messages/locals/URLs to avoid leaking arbitrary sensitive content.
 **51 passed**, covering mixed/all-invalid/duplicates/provider failure/retry,
 persistence rollback, private log permissions/redaction, migrations and evaluation
 protections. Global storage outages are not recoverable without repairing storage.
+
+## 7. Frontend response ordering
+
+Verified stale load/navigation race. Selections now increment a generation and
+abort pending loads. Generation checks also protect against transports that
+ignore cancellation; new investigation and unmount invalidate loads/actions.
+Polling is serial, abortable and scoped to the selected investigation. Loading,
+errors, feedback reloads and mutation continuations respect selection changes.
+
+Added Vitest/Testing Library following the installed Next.js guide. The initial
+install had a Node-types peer conflict; aligning types to Node 22 resolved it.
+The selected jsdom version requires Node 22.22.2+ on the 22.x line; manifest and
+README now declare compatible runtimes. The lockfile includes test dependencies.
+
+From frontend: `npm test` **6 passed** (deliberately reordered responses, new
+selection, errors, obsolete polling, serial polling/refresh, unmount).
+`npx tsc --noEmit` passed; `npx eslint src/components/InvestigationWorkspace.tsx src/lib/investigation-api.ts tests vitest.config.mts`
+passed without warnings; `npm run build -- --webpack` passed. Initial polling
+tests installed fake timers after scheduling real timers; corrected the test
+setup and reran. These are DOM behavioral tests, not live-browser/live-provider
+tests. Full legacy lint failures remain the recorded baseline.

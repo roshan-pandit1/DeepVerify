@@ -1,11 +1,11 @@
 export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/$/, "");
 
-export async function api<T>(path: string, method = "GET", body?: unknown, token?: string): Promise<T> {
+export async function api<T>(path: string, method = "GET", body?: unknown, token?: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`${API_BASE}/api${path}`, {
     method,
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(30000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000),
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
