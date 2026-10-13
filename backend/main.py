@@ -23,6 +23,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
+from legacy_safety import reject_url
+
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -144,6 +146,7 @@ async def analyze(
 
     Returns: { "job_id": "<uuid>" }
     """
+    reject_url(source_url)
     if not file and not source_url:
         raise HTTPException(
             status_code=422,

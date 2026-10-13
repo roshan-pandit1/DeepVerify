@@ -39,7 +39,7 @@ async def handle_update(update: dict):
         video = message.get("video") or message.get("document")
 
         if text.startswith("/start"):
-            await reply("👋 Welcome to DeepVerify! Send me a video file or a social media URL, and I will analyze it for deepfakes.")
+            await reply("👋 Welcome to DeepVerify! Send me a video file, and I will analyze it for deepfakes.")
             return
 
         job_id = str(uuid.uuid4())
@@ -83,8 +83,10 @@ async def handle_update(update: dict):
                         async for chunk in response.aiter_bytes():
                             f_out.write(chunk)
         elif text and (text.startswith("http://") or text.startswith("https://")):
-            source_type = "url"
-            source_url = text
+            from legacy_safety import URL_DISABLED
+            await reply(URL_DISABLED)
+            job_dir.rmdir()
+            return
         else:
             await reply("Please send a valid video file or a URL.")
             return

@@ -47,3 +47,17 @@ socket access. `bash -n backend/start.sh`, `git diff --check` and
 passed. Containers were not built or deployed; shared-mount/UID setup remains an
 operator requirement. An initial pytest invocation from root failed import
 collection; the documented backend working-directory invocation passed.
+
+## 3. Legacy URL ingestion
+
+Verified route/background/Telegram paths. The yt-dlp graph includes extractor,
+redirect, manifest/fragment and potentially external downloader requests; no
+complete egress boundary exists here. Removed execution of that downloader and
+fail closed for **all** URLs, with a clear 503 at the API and a disabled result at
+the shared processor. No initial-URL-only security claim or unsafe opt-in flag.
+File uploads remain optional. Investigation fetching is unchanged.
+
+`cd backend && ../.venv/bin/python -m pytest investigation_tests/test_legacy_safety.py investigation_tests/test_ingestion.py investigation_tests/test_foundation.py -q`:
+**39 passed**. Includes legacy private/metadata/public/redirect/manifest rejection,
+file-only acceptance, and existing permitted public fetch/DNS pinning/private
+redirect checks. No live downloader or media-model execution was performed.

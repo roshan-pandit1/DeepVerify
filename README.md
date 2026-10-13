@@ -404,3 +404,12 @@ container builds. Running that application is an explicit local-only optional
 installation of `backend/requirements.txt`; it is not an investigation deployment.
 `backend/deploy.py` is a legacy blockchain transaction script, not an API deployer;
 never run it as a startup/build command.
+
+Legacy URL ingestion is **disabled**, including API, Telegram URL submissions and
+background calls to the video downloader. Public-looking URLs, redirects,
+playlists/manifests and private/metadata addresses are all rejected. There is no
+unsafe enable flag. A future implementation needs an enforced network boundary
+covering the downloader and all child processes; initial URL validation is not
+sufficient. The investigation public-article fetcher remains separate and retains
+DNS pinning, redirect validation and response limits. Optional legacy local file
+uploads remain supported with the legacy dependencies installed.

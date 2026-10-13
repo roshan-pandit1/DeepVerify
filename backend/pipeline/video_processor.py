@@ -2,7 +2,7 @@
 pipeline/video_processor.py — Video ingestion, frame extraction, audio stripping.
 
 Handles:
-  - URL downloads via yt-dlp (YouTube, TikTok, X/Twitter, Reddit, etc.)
+  - URL downloads disabled until an enforced egress boundary exists
   - Direct MP4/MOV file uploads
   - Frame extraction at configurable FPS via OpenCV
   - Audio extraction to MP3 via ffmpeg subprocess
@@ -49,104 +49,16 @@ def _job_dir(job_id: str) -> Path:
 
 
 async def download_from_url(job_id: str, url: str) -> VideoProcessorResult:
-    """Download a video from a social media URL using yt-dlp."""
-    settings = get_settings()
-    dest_dir = _job_dir(job_id)
-    output_path = dest_dir / "video.mp4"
+    """Reject even direct/background calls before config, DNS or downloader imports.
 
-    max_mb = settings.max_video_size_mb
-    logger.info("[%s] Downloading URL: %s", job_id, url)
-
-    import yt_dlp
-    import yt_dlp.utils  # type: ignore
-    import json
-    import re
-
-    ydl_opts: dict = {
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-        'merge_output_format': 'mp4',
-        'outtmpl': str(output_path),
-        'noplaylist': True,
-        'max_filesize': max_mb * 1024 * 1024,
-        'quiet': True,
-        'no_warnings': True,
-        'no_color': True,
-        'socket_timeout': 60,
-        'extractor_args': {
-            'youtube': {'player_client': ['android', 'web', 'ios']}
-        },
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9',
-        }
-    }
-
-    # Support cookies for authentication
-    if settings.cookies_file_path:
-        cookies_path = Path(settings.cookies_file_path)
-    else:
-        cookies_path = Path("cookies.txt")
-        
-    if cookies_path.exists():
-        logger.info("[%s] Using cookies from %s for authentication", job_id, cookies_path)
-        ydl_opts['cookiefile'] = str(cookies_path.resolve())
-
-    def _download():
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore
-            ydl.download([url])
-
-    try:
-        await asyncio.to_thread(_download)
-    except yt_dlp.utils.DownloadError as exc:
-        raw_err = str(exc)
-        clean_err = re.sub(r'\x1b\[[0-9;]*[mGKH]', '', raw_err).strip()
-        # Clean prefix like "ERROR: "
-        if clean_err.startswith("ERROR: "):
-            clean_err = clean_err[7:].strip()
-        
-        err_str_lower = clean_err.lower()
-        logger.warning("[%s] yt-dlp DownloadError: %s", job_id, clean_err)
-        
-        # Check for private/restricted/bot keywords across platforms (Instagram, YouTube, TikTok, X, etc.)
-        restricted_keywords = [
-            "login", "registered users", "private", "follow this account",
-            "age-restricted", "sign in", "certain audiences", "isn't available to everyone",
-            "is not available to everyone", "not available", "confirm you're not a bot",
-            "bot", "members-only", "requires authentication", "cookies", "login required",
-            "restricted account", "account is private", "unavailable"
-        ]
-        if any(kw in err_str_lower for kw in restricted_keywords):
-            return VideoProcessorResult(
-                job_id=job_id, video_path="", audio_path=None, frames_dir="",
-                error_code="PRIVATE_OR_RESTRICTED_MEDIA",
-                error=f"This video is restricted or requires login access: {clean_err}"
-            )
-            
-        return VideoProcessorResult(
-            job_id=job_id, video_path="", audio_path=None, frames_dir="",
-            error_code="DOWNLOAD_FAILED",
-            error=f"Video download failed: {clean_err}"
-        )
-    except Exception as exc:
-        raw_err = str(exc)
-        clean_err = re.sub(r'\x1b\[[0-9;]*[mGKH]', '', raw_err).strip()
-        logger.error("[%s] yt-dlp unexpected error: %s", job_id, clean_err)
-        return VideoProcessorResult(
-            job_id=job_id, video_path="", audio_path=None, frames_dir="",
-            error_code="DOWNLOAD_FAILED",
-            error=f"Unexpected download error: {clean_err}"
-        )
-
-    if not output_path.exists():
-        return VideoProcessorResult(
-            job_id=job_id, video_path="", audio_path=None, frames_dir="",
-            error_code="DOWNLOAD_FAILED",
-            error="yt-dlp completed but output file not found."
-        )
-
-    logger.info("[%s] Download complete: %s (%.1f MB)", job_id, output_path,
-                output_path.stat().st_size / 1024 / 1024)
-    return await _process_video_file(job_id, str(output_path))
+    yt-dlp delegates redirects, manifests, fragments and sometimes ffmpeg requests.
+    An initial URL preflight cannot enforce destination safety for that graph.
+    Re-enable only after a separately enforced egress boundary is implemented.
+    """
+    from legacy_safety import URL_DISABLED
+    return VideoProcessorResult(job_id=job_id, video_path="", audio_path=None,
+                                frames_dir="", error=URL_DISABLED,
+                                error_code="LEGACY_URL_INGESTION_DISABLED")
 
 
 async def process_uploaded_file(job_id: str, upload_path: str) -> VideoProcessorResult:
