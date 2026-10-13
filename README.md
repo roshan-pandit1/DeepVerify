@@ -437,3 +437,19 @@ clear the exported browser cookies. If account compromise is suspected, change
 the account password and follow the service's recovery guidance. Deleting the
 export alone does not invalidate server sessions. No account/session action or
 Git-history rewrite was performed automatically.
+
+Malformed search results are isolated individually. Successfully persisted
+sources survive malformed neighbors, provider failures on retry and individual
+persistence failures. Each source graph commits in its own transaction; a failed
+source rolls back without leaving orphan evidence. Mixed results produce a
+`partial` search; all-invalid results produce `failed`. Retries preserve and
+deduplicate valid evidence. Empty successful provider responses remain complete
+with insufficient evidence.
+
+Migration 4 adds safe per-result failure references. Technical diagnostics live
+under `INVESTIGATION_ARTIFACTS/diagnostics/worker.jsonl` (directory 0700, file 0600).
+They record exception type, SQLite error code and stack locations, deliberately
+excluding raw exception messages, source text, URLs and local variables. The API
+exposes only operation/index/incident identifiers. Restrict artifact access and
+rotate these logs operationally. A global disk/database outage can still stop a
+worker; persisted work remains recoverable after storage is repaired.

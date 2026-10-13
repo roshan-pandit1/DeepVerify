@@ -123,6 +123,7 @@ def detail(claim_id: str):
                     FROM source_passages p JOIN source_documents s ON s.id=p.source_id WHERE p.evidence_id=?''', (evidence['id'],)).fetchone()
                 evidence['source'] = dict(source) if source else None
         item['searches'] = rows(db, 'SELECT * FROM searches WHERE claim_id=? ORDER BY rowid', (claim_id,))
+        item['result_failures'] = rows(db, 'SELECT f.* FROM search_result_failures f JOIN searches s ON s.id=f.search_id WHERE s.claim_id=? ORDER BY f.rowid', (claim_id,))
         item['audit'] = rows(db, 'SELECT * FROM audit_log_entries WHERE claim_id=? ORDER BY rowid', (claim_id,))
         item['related'] = related(db, claim_id)
         item['job'] = dict(r) if (r := db.execute('SELECT state, lease_until, attempts FROM investigation_jobs WHERE claim_id=?', (claim_id,)).fetchone()) else None

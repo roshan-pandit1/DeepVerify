@@ -183,4 +183,4 @@ def test_migration_two_keeps_feedback_memory_and_active_model(client):
     with connect() as db:
         assert db.execute('SELECT memory_text FROM investigations WHERE claim_id=?', (item['claim_id'],)).fetchone()[0] == before
         assert db.execute('SELECT model_id FROM active_ranker').fetchone()[0] == 'baseline-v1'
-        assert {r[0] for r in db.execute('SELECT version FROM investigation_migrations')} == {1, 2, 3}
+        assert {r[0] for r in db.execute('SELECT version FROM investigation_migrations')} == {1, 2, 3, 4}

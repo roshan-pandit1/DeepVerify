@@ -119,6 +119,9 @@ def migrate():
         CREATE TABLE IF NOT EXISTS pilot_requests (
           id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES pilot_runs(id), kind TEXT NOT NULL,
           reference TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS search_result_failures (
+          id TEXT PRIMARY KEY, search_id TEXT NOT NULL REFERENCES searches(id),
+          result_index INTEGER NOT NULL, category TEXT NOT NULL, incident TEXT NOT NULL, created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS search_observations (
           search_id TEXT PRIMARY KEY REFERENCES searches(id), latency_ms INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS source_observations (
@@ -146,6 +149,7 @@ def migrate():
         db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (1, ?)', (now(),))
         db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (2, ?)', (now(),))
         db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (3, ?)', (now(),))
+        db.execute('INSERT OR IGNORE INTO investigation_migrations VALUES (4, ?)', (now(),))
 
 
 def audit(db, claim_id, stage, output):
@@ -159,4 +163,4 @@ def rows(db, sql, args=()):
 
 if __name__ == '__main__':
     migrate()
-    print('Additive investigation migrations through 3 applied; existing records preserved.')
+    print('Additive investigation migrations through 4 applied; existing records preserved.')

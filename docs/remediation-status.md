@@ -91,3 +91,17 @@ Checks: `git ls-files backend/cookies.txt` empty; `git check-ignore -q backend/c
 passed; programmatic scan found no cookie values in staged additions or install
 logs. Staged deletion was reviewed via metadata/stat only. Legacy safety suite:
 **9 passed**. Historical cookie content remains in prior commits.
+
+## 6. Per-result retrieval isolation
+
+Verified whole-assertion loss from malformed provider items/URLs. Provider mapping
+and worker validation now isolate each item. Separate result transactions retain
+successes and roll back failed source/evidence graphs; canonical deduplication
+survives retries. Mixed and all-invalid outcomes are distinct. Additive migration
+4 stores safe result-failure references. Private structural diagnostics exclude
+raw exception messages/locals/URLs to avoid leaking arbitrary sensitive content.
+
+`cd backend && ../.venv/bin/python -m pytest investigation_tests/test_result_isolation.py investigation_tests/test_foundation.py investigation_tests/test_sources.py investigation_tests/test_evaluation.py -q`:
+**51 passed**, covering mixed/all-invalid/duplicates/provider failure/retry,
+persistence rollback, private log permissions/redaction, migrations and evaluation
+protections. Global storage outages are not recoverable without repairing storage.
