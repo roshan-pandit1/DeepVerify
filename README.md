@@ -361,3 +361,46 @@ The dedicated investigation tests avoid legacy fixtures that mock unrelated heav
 Work is checkpointed on `rebuild/investigation-platform`. Milestones one and two through `983db4e` were pushed after authorization. During the milestone-three pause, the repository acquired foundation commit `55fc57d`; its remote-tracking reflog records an external push. The agent did not perform that push. **Subsequent verification/documentation checkpoints are local only, with remote backup pending authorization; nothing was deployed.** Existing records and legacy code are preserved. Generated datasets, credentials, cookies, databases, source snapshots, reviewer data and model artifacts are not included in commits.
 
 Next measurement step: supply SerpAPI/admin configuration, populate real candidate plans, recruit independent reviewers, then use the bounded collection and frozen evaluation workflow. **Does independently reviewed feedback demonstrably improve ranking? Not yet measured.**
+
+## Default startup and private deployment
+
+`bash backend/start.sh` starts **only the investigation API**, on loopback.
+Run `bash backend/start.sh worker` in a second terminal/process. Dependencies are
+installed during setup/build, never at service startup. `DEEPVERIFY_PYTHON` can
+select the interpreter; otherwise the root `.venv` is preferred. Relative SQLite
+and artifact paths now resolve against `backend/` consistently for API, worker
+and CLI. Check the intended existing database path before starting any service.
+
+The supplied `compose.yaml` provisions **two separate services on one host**.
+Set `DEEPVERIFY_DATA_DIR` to an existing durable local directory containing the
+intended database; set `INVESTIGATION_DB_FILENAME` if it is not `deepfake.db`.
+Both services mount that same directory. Preserve existing artifacts under its
+`investigation-data/` directory, or adjust both mounts/configurations together.
+Back up the SQLite database consistently (including WAL state) and artifacts
+before moving existing storage. Grant service UID 10001 write access. A new
+empty database is appropriate only for an explicitly new installation.
+
+After configuring `backend/.env`, an operator can provision both services with
+`docker compose up -d --build api worker`. This command is documentation, not a
+deployment performed by this remediation. The host API port is loopback-only;
+use a trusted private network/access gateway before making it remotely reachable.
+Do not use NFS for SQLite WAL or scale services across hosts. Verify both
+`docker compose ps` entries and worker progress after provisioning/restarts.
+
+The Procfile declares web and worker commands but **does not provision a worker**.
+Nixpacks builds the investigation dependencies with backend as its build root and
+starts only the API. Its hosting platform must separately provision the worker
+with the same durable filesystem and configuration. Hosts with isolated ephemeral
+filesystems (including separate Heroku dynos) are unsupported for this SQLite
+architecture. A declaration of identical paths on separate volumes is not shared
+storage. Use the single-host Compose setup instead.
+
+References: [Compose shared volumes](https://docs.docker.com/reference/compose-file/volumes/),
+[Nixpacks configuration](https://nixpacks.com/docs/configuration/file),
+[Heroku filesystem isolation](https://devcenter.heroku.com/articles/dyno-isolation).
+
+Legacy media dependencies and `main:app` are excluded from default startup and
+container builds. Running that application is an explicit local-only optional
+installation of `backend/requirements.txt`; it is not an investigation deployment.
+`backend/deploy.py` is a legacy blockchain transaction script, not an API deployer;
+never run it as a startup/build command.

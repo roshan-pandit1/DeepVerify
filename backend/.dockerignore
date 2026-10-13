@@ -1,0 +1,7 @@
+**
+!Dockerfile
+!.dockerignore
+!requirements-investigation.txt
+!start.sh
+!investigation/
+!investigation/*.py

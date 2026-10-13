@@ -30,3 +30,20 @@ Historical milestone reports describe earlier environments, not this checkout.
 
 Subsequent sections record each checkpoint's checks and limitations. Commit IDs
 are available in the sequential Git log and the completion report.
+
+## 2. Startup and deployment
+
+Verified the mismatch. API and worker now have explicit launcher roles; default
+startup installs/imports no legacy media, Telegram or blockchain code. Storage
+paths are independent of working directory; private deployments require explicit
+absolute paths. Compose provisions both processes on one host with the same bind
+mount; Procfile/Nixpacks alone do not provision workers or shared storage.
+
+Checks: from backend, `../.venv/bin/python -m pytest investigation_tests/test_runtime.py investigation_tests/test_foundation.py investigation_tests/test_evaluation.py -q`
+(**37 passed**); `../.venv/bin/python -m investigation.smoke` (**passed**, including
+API restart with queued work and separate worker). Smoke required approved local
+socket access. `bash -n backend/start.sh`, `git diff --check` and
+`DEEPVERIFY_DATA_DIR=/tmp docker compose --env-file backend/.env.investigation.example config --no-env-resolution --quiet`
+passed. Containers were not built or deployed; shared-mount/UID setup remains an
+operator requirement. An initial pytest invocation from root failed import
+collection; the documented backend working-directory invocation passed.

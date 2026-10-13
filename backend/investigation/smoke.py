@@ -42,12 +42,15 @@ def run(with_frontend=False):
     with tempfile.TemporaryDirectory(prefix='synthetic-smoke-', dir=root) as directory:
         token = secrets.token_urlsafe(32)
         env = dict(os.environ, INVESTIGATION_DB=directory + '/synthetic.db', INVESTIGATION_ARTIFACTS=directory + '/artifacts',
-                   INVESTIGATION_ADMIN_TOKEN=token, SERPAPI_API_KEY='')
+                   INVESTIGATION_ADMIN_TOKEN=token, SERPAPI_API_KEY='', INVESTIGATION_DEPLOYMENT='local',
+                   DEEPVERIFY_PYTHON=sys.executable)
         api_port = unused_port()
         processes = []
         with open(directory + '/servers.log', 'w') as log:
             try:
-                api = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'investigation.api:app', '--host', '127.0.0.1', '--port', str(api_port)],
+                env.update(PORT=str(api_port), INVESTIGATION_HOST='127.0.0.1')
+                api_command = ['bash', 'start.sh', 'api']
+                api = subprocess.Popen(api_command,
                                        cwd=backend, env=env, stdout=log, stderr=log)
                 processes.append(api)
                 base = f'http://127.0.0.1:{api_port}'
@@ -57,6 +60,11 @@ def run(with_frontend=False):
                     response.raise_for_status()
                     identifier = response.json()['claim_id']
                     client.post(f'/api/investigations/{identifier}/run').raise_for_status()
+                    # Restart the API while a job is queued; the separate process must recover it.
+                    api.terminate(); api.wait(timeout=10)
+                    api = subprocess.Popen(api_command, cwd=backend, env=env, stdout=log, stderr=log)
+                    processes.append(api)
+                    wait_ready(base + '/api/learning', api)
                     subprocess.run([sys.executable, '-m', 'investigation.worker', '--once'], cwd=backend, env=env, check=True, timeout=30, capture_output=True)
                     report = client.get(f'/api/investigations/{identifier}').json()
                     assert report['stage'] == 'complete'
@@ -79,7 +87,7 @@ def run(with_frontend=False):
                 log.flush()
                 assert token not in Path(directory + '/servers.log').read_text()
                 result = {'status': 'passed', 'kind': 'synthetic functionality only', 'api_http': 'passed',
-                          'separate_worker_process': 'passed', 'source_trace_api': 'passed',
+                          'separate_worker_process': 'passed', 'queued_api_restart': 'passed', 'source_trace_api': 'passed',
                           'administrator_allow_deny': 'passed using temporary test token; does not configure the real environment',
                           'secret_log_check': 'passed', 'frontend': frontend_status,
                           'synthetic_cases': 1, 'real_benchmark_cases_added': 0, 'accuracy': 'not measured',

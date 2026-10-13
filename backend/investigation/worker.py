@@ -135,6 +135,8 @@ if __name__ == '__main__':
     parser.add_argument('--once', action='store_true')
     parser.add_argument('--run-id', help='Only process jobs belonging to this bounded pilot/validation run')
     args = parser.parse_args()
+    from .runtime import validate_storage
+    validate_storage()
     migrate()
     if args.once:
         run_once(args.run_id)

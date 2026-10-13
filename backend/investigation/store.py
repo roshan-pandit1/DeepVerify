@@ -5,9 +5,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
-from dotenv import load_dotenv
-
-load_dotenv()
+from .runtime import storage_path
 
 
 def now():
@@ -20,7 +18,7 @@ def uid():
 
 @contextmanager
 def connect():
-    db = sqlite3.connect(os.getenv('INVESTIGATION_DB', 'deepfake.db'), timeout=30)
+    db = sqlite3.connect(storage_path('INVESTIGATION_DB', 'deepfake.db'), timeout=30)
     db.row_factory = sqlite3.Row
     db.execute('PRAGMA foreign_keys=ON')
     db.execute('PRAGMA journal_mode=WAL')

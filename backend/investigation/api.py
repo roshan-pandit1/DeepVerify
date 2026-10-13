@@ -8,6 +8,7 @@ from fastapi import FastAPI, Depends, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
+from .runtime import validate_storage
 from .extraction import extract, metadata
 from .ingestion import fetch_article
 from .memory import related, LexicalMemory
@@ -17,6 +18,7 @@ from .store import connect, migrate, now, uid, rows, audit
 
 @asynccontextmanager
 async def lifespan(app):
+    validate_storage()
     migrate()
     yield
 

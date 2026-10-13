@@ -1,0 +1,25 @@
+# Single host, local filesystem. Provision BOTH services explicitly with compose up.
+x-backend: &backend
+  build: ./backend
+  env_file: backend/.env
+  environment:
+    INVESTIGATION_DEPLOYMENT: private
+    INVESTIGATION_DB: /data/${INVESTIGATION_DB_FILENAME:-deepfake.db}
+    INVESTIGATION_ARTIFACTS: /data/investigation-data
+    INVESTIGATION_HOST: 0.0.0.0
+    PORT: "8000"
+  volumes:
+    - type: bind
+      source: ${DEEPVERIFY_DATA_DIR:?Set the existing durable data directory explicitly}
+      target: /data
+      bind:
+        create_host_path: false
+  restart: unless-stopped
+services:
+  api:
+    <<: *backend
+    command: ["bash", "start.sh", "api"]
+    ports: ["127.0.0.1:8000:8000"]
+  worker:
+    <<: *backend
+    command: ["bash", "start.sh", "worker"]

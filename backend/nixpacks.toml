@@ -1,11 +1,7 @@
-[phases.setup]
-aptPkgs = [
-    "ffmpeg",
-    "libglib2.0-0",
-    "libgl1",
-    "libgl1-mesa-glx",
-    "libxcb1",
-    "libsm6",
-    "libxext6",
-    "libxrender1"
-]
+providers = ["python"]
+
+[phases.install]
+cmds = ["python -m venv /opt/venv", "/opt/venv/bin/pip install -r requirements-investigation.txt"]
+
+[start]
+cmd = "DEEPVERIFY_PYTHON=/opt/venv/bin/python bash start.sh api"

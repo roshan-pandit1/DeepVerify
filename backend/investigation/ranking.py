@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from .extraction import metadata
+from .runtime import storage_path
 
 FEATURE_VERSION = 'lexical-entities-temporal-v1'
 FEATURES = ['lexical_overlap', 'entity_overlap', 'temporal_match', 'date_missing', 'semantic_missing']
@@ -29,7 +30,7 @@ def baseline(x):
 
 
 def artifact_dir():
-    return Path(os.getenv('INVESTIGATION_ARTIFACTS', 'investigation-data'))
+    return storage_path('INVESTIGATION_ARTIFACTS', 'investigation-data')
 
 
 def score(x, model_id='baseline-v1'):

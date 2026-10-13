@@ -1,46 +1,17 @@
 #!/bin/bash
-# start.sh — Launch the FastAPI backend
-set -e
-
+# No dependency installation, reload server, or legacy imports at startup.
+set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-
-# Check for .env file
-if [ ! -f ".env" ]; then
-  echo ""
-  echo "=========================================================="
-  echo "  ERROR: .env file not found in backend/"
-  echo "  Copy .env.example to .env and fill in your API keys:"
-  echo "    cp .env.example .env"
-  echo "=========================================================="
+if [[ -n "${DEEPVERIFY_PYTHON:-}" ]]; then
+  PYTHON="$DEEPVERIFY_PYTHON"
+elif [[ -x ../.venv/bin/python ]]; then
+  PYTHON=../.venv/bin/python
+else
+  PYTHON=python3
+fi
+if ! "$PYTHON" -c 'import uvicorn, dotenv, fastapi, bs4' >/dev/null 2>&1; then
+  echo 'Install backend/requirements-investigation.txt in .venv, or set DEEPVERIFY_PYTHON to that interpreter.' >&2
   exit 1
 fi
-
-# Check for virtual environment
-if [ ! -d "venv" ]; then
-  echo "Creating Python virtual environment..."
-  python3 -m venv venv
-fi
-
-source venv/bin/activate
-
-# Install dependencies if needed
-export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
-pip install -q -r requirements.txt --prefer-binary
-
-# Ensure /tmp/uploads exists
-mkdir -p /tmp/uploads
-
-echo ""
-echo "=========================================================="
-echo "  Starting Video Authenticity Engine (FastAPI)"
-echo "  API: http://localhost:8000"
-echo "  Docs: http://localhost:8000/docs"
-echo "=========================================================="
-echo ""
-
-uvicorn main:app \
-  --host 0.0.0.0 \
-  --port 8000 \
-  --reload \
-  --log-level info
+exec "$PYTHON" -m investigation.launch "${@:-api}"
