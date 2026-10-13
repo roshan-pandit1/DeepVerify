@@ -156,16 +156,14 @@ async def run_pipeline(job_id: str):
                 
                 # Format a clean message instead of dumping JSON
                 display_msg = proc_result.error
-                cookie_hint = ""
                 if proc_result.error_code == "PRIVATE_OR_RESTRICTED_MEDIA":
                     display_msg = "This video is from a private account or requires authentication."
-                    cookie_hint = "\n\n(Optional) If you want your backend to access login-gated videos, export your session cookies using a browser extension (like Get cookies.txt LOCALLY) and save the file as backend/cookies.txt"
                 
                 try:
                     async with httpx.AsyncClient() as client:
                         await client.post(url, json={
                             "chat_id": telegram_chat_id,
-                            "text": f"❌ Analysis Failed\n\n{display_msg}{cookie_hint}"
+                            "text": f"❌ Analysis Failed\n\n{display_msg}"
                         })
                 except Exception:
                     pass

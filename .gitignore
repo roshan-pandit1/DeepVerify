@@ -43,4 +43,7 @@ Thumbs.db
 backend/investigation-data/
 investigation-data/
 *.cookies.txt
+backend/cookies.txt
+**/cookies.txt
+**/cookies-*.txt
 frontend/.env.production.local

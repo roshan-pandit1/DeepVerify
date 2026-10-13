@@ -420,3 +420,20 @@ persistence failure. Server-generated job directories and `video.mp4` filenames
 are used. These application bounds complement reverse-proxy/server request-body,
 concurrency, timeout and multipart spool-disk limits; multipart parsing occurs
 before the endpoint and must also be bounded by the private deployment gateway.
+
+### Local credentials and previously tracked cookies
+
+`backend/cookies.txt` was tracked and contained YouTube and Instagram browser
+cookie metadata. It is now untracked and ignored; the existing local copy is
+preserved. Removing it from the current tree **does not remove copies in Git
+history, clones or backups**. Cookie validity and account access were not tested.
+No cookie values are needed by the investigation workflow, and the disabled legacy
+downloader no longer loads them. `cookies_file_path` remains only as a compatibility
+setting. Keep any future local credential exports outside version control.
+
+The account owner should review Google/YouTube device sessions and Instagram
+Accounts Center login sessions, sign out affected/unrecognized sessions, and
+clear the exported browser cookies. If account compromise is suspected, change
+the account password and follow the service's recovery guidance. Deleting the
+export alone does not invalidate server sessions. No account/session action or
+Git-history rewrite was performed automatically.

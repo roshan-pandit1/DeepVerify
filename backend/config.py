@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     model_weights_path: str = ""
 
     # ── Yt-Dlp Config ─────────────────────────────────────────────────────
+    # Compatibility-only local setting. URL ingestion is disabled; no cookie file is loaded.
     cookies_file_path: str = ""
 
     # ── Blockchain / IPFS Provenance (all optional) ───────────────────────

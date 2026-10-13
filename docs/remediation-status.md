@@ -76,3 +76,18 @@ cancellation, persistence failure, preserved pre-existing directory, URL guards)
 These exercise the actual upload helper; the heavyweight legacy application's
 full pipeline was not started. Also corrected the prior section's test count to
 38 (the actual result); no prior commit was rewritten.
+
+## 5. Cookie hygiene
+
+Confirmed tracking without printing contents. Removed only the index entry;
+verified the surviving local file against its pre-change SHA-256 without printing
+the hash or values. Exact path/common exports are ignored. Non-secret domains
+identify YouTube and Instagram. Removed obsolete runtime advice to supply cookies;
+URL ingestion no longer loads them. README documents historical exposure and
+account-owner session review/invalidation. No session was invalidated and no
+history was rewritten.
+
+Checks: `git ls-files backend/cookies.txt` empty; `git check-ignore -q backend/cookies.txt`
+passed; programmatic scan found no cookie values in staged additions or install
+logs. Staged deletion was reviewed via metadata/stat only. Legacy safety suite:
+**9 passed**. Historical cookie content remains in prior commits.
