@@ -29,7 +29,7 @@ export default function ReviewDesk() {
   }
   return <div className={styles.workspace}><header className={styles.header}><Link className={styles.brand} href="/">DeepVerify</Link><Link href="/evaluation">Evaluation reports</Link><span>Administrator review desk</span></header>
     <main style={{ maxWidth: 900, margin: "auto", padding: 32 }}>
-      <h1>Reviewed feedback</h1><p>Review the assertion and source before approving. Only approved live relevance labels are eligible for ranking training. Stance review updates the assessment separately.</p>
+      <h1>Reviewed feedback</h1><p>Review the assertion and source before approving. Only approved live relevance labels are eligible for ranking training. Stance review updates the assessment separately.</p><p>Automation proposes only unrelated or needing review. Supporting or contradicting stances require your explicit approval after inspecting the source. A supported assessment records reviewed source support, not independent proof; citation support is a separate human evaluation.</p>
       <section className={styles.panel}><label>Administrator token<input type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)} /></label>
         <p className={styles.hint}>Token remains in page memory only. This local administration scheme has one shared administrator identity and no account-level roles. Use a trusted local connection.</p>
         <button disabled={busy} onClick={() => act(load)}>Load review queue & history</button></section>

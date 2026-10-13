@@ -124,7 +124,9 @@ export default function InvestigationWorkspace() {
         </section>
       </aside>
       <div className={styles.content}>
-        <div className={styles.intro}><span className={styles.eyebrow}>EVIDENCE FIRST</span><h1>Investigate the claim.<br />Inspect the evidence.</h1><p>Separate what sources support, what they contradict, and what remains unknown.</p></div>
+        <div className={styles.intro}><span className={styles.eyebrow}>EVIDENCE FIRST</span><h1>Investigate the claim.<br />Inspect the evidence.</h1><p>Separate what sources support, what they contradict, and what remains unknown.</p>
+          <p className={styles.hint}>Shared workspace: admitted participants can see all investigations and feedback.</p>
+          <p className={styles.notice}>Automated stance is triage only: unrelated or needing review. Supported or contradicted assessments require administrator-approved source-stance review. Relevance ranking does not establish truth.</p></div>
         {error && <div role="alert" className={styles.error}>{error}</div>}
         {loading && <p role="status">Loading investigation…</p>}
         {notice && <div role="status" className={styles.notice}>{notice}</div>}

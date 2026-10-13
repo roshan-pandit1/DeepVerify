@@ -170,3 +170,18 @@ unverified and were not attempted.
 The updated `../.venv/bin/python -m investigation.smoke` also **passed** with real
 loopback HTTP, queued API restart, separate worker, report/source retrieval and
 administrator allow/deny plus token-free log checks.
+
+## 10. Honest stance limitations
+
+Verified both built-in classifiers emit only unrelated/needing-review. Added
+prominent submission/report and review-desk explanations: supporting/contradicting
+assessments require explicit approved source-stance review. Shared visibility is
+also stated in the UI. No keyword truth labels or optional model were added.
+Relevance, stance, sufficiency and citation-support semantics remain separate.
+
+`cd backend && ../.venv/bin/python -m pytest investigation_tests/test_stance_policy.py investigation_tests/test_sources.py investigation_tests/test_training.py investigation_tests/test_evaluation.py -q`:
+**33 passed**, including pending-versus-approved review, unchanged predictions,
+no stance-to-relevance training leakage, promotion rejection and rollback.
+Frontend `npm test`: **7 passed**, including visible limitations;
+`npx eslint src/components/InvestigationWorkspace.tsx src/app/review/page.tsx tests`
+passed. No real-world accuracy or ranking improvement was measured.

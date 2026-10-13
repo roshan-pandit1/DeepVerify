@@ -109,3 +109,10 @@ describe("investigation navigation", () => {
     await waitFor(() => expect(screen.queryByLabelText("Investigation report")).toBeNull());
   });
 });
+
+
+it("explains shared access and the human-review requirement before submission", async () => {
+  await open();
+  expect(screen.getByText(/Automated stance is triage only/).textContent).toContain("administrator-approved");
+  expect(screen.getByText(/Shared workspace:/)).toBeTruthy();
+});

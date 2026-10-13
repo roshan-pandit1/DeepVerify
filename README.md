@@ -551,3 +551,19 @@ that policy from SQLite. Restart services with matching environment values.
 Protect database/artifact files; their administrator remains trusted. The default
 launcher disables Uvicorn access logs and forwarded-header trust; no token values
 are recorded in application diagnostics.
+
+## What automated stance does—and what review establishes
+
+Both built-in classifiers (`guarded-rules` and `legacy`) produce only **unrelated**
+or **needing review**. They cannot establish factual support or contradiction.
+There is no model-backed entailment classifier enabled. A completed search can
+therefore honestly retain an **insufficient evidence** assessment.
+
+Supporting/contradicting source stances require an administrator-approved stance
+review. Sufficiency then summarizes reviewed source support/contradiction; even
+“supported” is not independent proof of truth. Relevance answers whether a source
+addresses an assertion and controls ranking; it is separate from stance,
+sufficiency and independently reviewed citation support. Only approved live
+**relevance** feedback is eligible for ranking training. Predictions, pending
+feedback and stance corrections do not become relevance labels or independent
+evaluation truth. No accuracy or improvement is claimed without approved data.
