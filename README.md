@@ -413,3 +413,10 @@ covering the downloader and all child processes; initial URL validation is not
 sufficient. The investigation public-article fetcher remains separate and retains
 DNS pinning, redirect validation and response limits. Optional legacy local file
 uploads remain supported with the legacy dependencies installed.
+
+Legacy file uploads are streamed in at most 64 KiB chunks, stop at the first byte
+beyond `MAX_VIDEO_SIZE_MB`, and clean partial files on rejection, cancellation or
+persistence failure. Server-generated job directories and `video.mp4` filenames
+are used. These application bounds complement reverse-proxy/server request-body,
+concurrency, timeout and multipart spool-disk limits; multipart parsing occurs
+before the endpoint and must also be bounded by the private deployment gateway.

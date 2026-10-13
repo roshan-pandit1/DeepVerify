@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Optional
 
 from legacy_safety import reject_url
+from legacy_upload import receive_upload
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -155,49 +156,24 @@ async def analyze(
 
     job_id = str(uuid.uuid4())
     job_dir = Path(f"/tmp/uploads/{job_id}")
-    job_dir.mkdir(parents=True, exist_ok=True)
-
-    source_type = "url" if source_url else "file"
-    video_path = None
-    original_filename = None
-
-    # If file upload: save to disk immediately
-    if file:
-        # Validate size
-        max_bytes = settings.max_video_size_mb * 1024 * 1024
-        content = await file.read()
-        if len(content) > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large. Maximum size: {settings.max_video_size_mb}MB",
+    original_filename = file.filename or "upload.mp4"
+    async with receive_upload(file, job_dir, settings.max_video_size_mb * 1024 * 1024) as (video_path, size):
+        async with AsyncSessionLocal() as session:
+            job = Job(
+                id=job_id,
+                status=JobStatus.PENDING,
+                source_type="file",
+                source_url=None,
+                original_filename=original_filename,
+                video_path=video_path,
+                user_claim=user_claim,
+                virality_speed=virality_speed,
             )
-        original_filename = file.filename or "upload.mp4"
-        video_path = str(job_dir / "video.mp4")
-        with open(video_path, "wb") as f_out:
-            f_out.write(content)
-        logger.info("[%s] File uploaded: %s (%.1f MB)", job_id, original_filename,
-                    len(content) / 1024 / 1024)
-
-    # Persist job to DB
-    async with AsyncSessionLocal() as session:
-        job = Job(
-            id=job_id,
-            status=JobStatus.PENDING,
-            source_type=source_type,
-            source_url=source_url,
-            original_filename=original_filename,
-            video_path=video_path,
-            user_claim=user_claim,
-            virality_speed=virality_speed,
-        )
-        session.add(job)
-        await session.commit()
-
-    # Enqueue background pipeline
-    background_tasks.add_task(run_pipeline, job_id)
-    logger.info("[%s] Job created, pipeline enqueued. source_type=%s", job_id, source_type)
-
-    return {"job_id": job_id}
+            session.add(job)
+            await session.commit()
+        background_tasks.add_task(run_pipeline, job_id)
+        logger.info("[%s] File upload received (%.1f MB), pipeline queued", job_id, size / 1024 / 1024)
+        return {"job_id": job_id}
 
 
 @app.get("/api/status/{job_id}", summary="Poll pipeline progress")

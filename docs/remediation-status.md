@@ -58,6 +58,21 @@ the shared processor. No initial-URL-only security claim or unsafe opt-in flag.
 File uploads remain optional. Investigation fetching is unchanged.
 
 `cd backend && ../.venv/bin/python -m pytest investigation_tests/test_legacy_safety.py investigation_tests/test_ingestion.py investigation_tests/test_foundation.py -q`:
-**39 passed**. Includes legacy private/metadata/public/redirect/manifest rejection,
+**38 passed**. Includes legacy private/metadata/public/redirect/manifest rejection,
 file-only acceptance, and existing permitted public fetch/DNS pinning/private
 redirect checks. No live downloader or media-model execution was performed.
+
+## 4. Legacy upload memory and cleanup
+
+Verified unbounded read-before-limit. Replaced it with a 64 KiB bounded receiver,
+reading at most one byte beyond the configured limit and returning HTTP 413.
+The cleanup scope includes database persistence/job registration and catches
+cancellation; server filenames ignore supplied filenames. Documented upstream
+multipart/body/spool limits. No media-model behavior was changed.
+
+`cd backend && ../.venv/bin/python -m pytest investigation_tests/test_legacy_upload.py investigation_tests/test_legacy_safety.py -q`:
+**15 passed** (accepted/exact-limit, oversize early stop, read failure,
+cancellation, persistence failure, preserved pre-existing directory, URL guards).
+These exercise the actual upload helper; the heavyweight legacy application's
+full pipeline was not started. Also corrected the prior section's test count to
+38 (the actual result); no prior commit was rewritten.
