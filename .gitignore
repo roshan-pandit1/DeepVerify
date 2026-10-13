@@ -1,4 +1,5 @@
 # Environments
+node_modules/
 backend/.env
 backend/venv/
 frontend/.env.local

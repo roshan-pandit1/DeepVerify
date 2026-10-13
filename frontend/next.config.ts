@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // The frontend is an independent package; root manifests are retained separately.
+  turbopack: { root: __dirname },
+  outputFileTracingRoot: __dirname,
   images: {
     remotePatterns: [
       {

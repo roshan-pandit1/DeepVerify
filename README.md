@@ -453,3 +453,10 @@ excluding raw exception messages, source text, URLs and local variables. The API
 exposes only operation/index/incident identifiers. Restrict artifact access and
 rotate these logs operationally. A global disk/database outage can still stop a
 worker; persisted work remains recoverable after storage is repaired.
+
+Root `package.json`/`package-lock.json` retain the historical standalone
+`lucide-react` dependency; the frontend has its own complete package and lockfile.
+No root application scripts were found, so the root package is preserved for
+compatibility rather than silently removed. Generated `node_modules/` directories
+are ignored at every depth and are not tracked. Run frontend commands from
+`frontend/`; its bundler/tracing root is explicitly that directory.

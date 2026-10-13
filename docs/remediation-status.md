@@ -126,3 +126,17 @@ passed without warnings; `npm run build -- --webpack` passed. Initial polling
 tests installed fake timers after scheduling real timers; corrected the test
 setup and reran. These are DOM behavioral tests, not live-browser/live-provider
 tests. Full legacy lint failures remain the recorded baseline.
+
+## 8. Generated dependencies
+
+Confirmed 4,136 tracked root node_modules files. Removed index entries only;
+verified local `node_modules/lucide-react/package.json` remains. Added recursive
+node_modules ignore. Kept root manifests/lockfile: it is a historical standalone
+icon dependency with no root app scripts; frontend has an independent package.
+Explicit frontend bundler/tracing roots remove the multiple-lockfile warning.
+
+Clean frontend `npm ci` passed (**514 packages**); clean root lockfile installation
+in `/tmp/deepverify-root-install` passed (**2 packages**), preserving the existing
+root installation. `git ls-files 'node_modules/**' '**/node_modules/**'` is empty;
+ignore checks and `git diff --check` passed. Frontend behavioral tests and the
+Webpack production build were rerun after the clean installation.
