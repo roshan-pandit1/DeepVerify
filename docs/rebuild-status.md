@@ -1,4 +1,81 @@
-# Rebuild status — milestone three
+# Rebuild status — issue remediation
+
+Verified locally on **2026-10-13**, branch **`rebuild/investigation-platform`**,
+starting from clean `main` commit `44df135`. **Nothing was pushed or deployed.**
+Each of the ten requested steps has a separate local checkpoint. See
+[the detailed sequential record](remediation-status.md) for commits, exact checks,
+initial failures and per-issue limitations.
+
+## Current results
+
+- Investigation backend: **120 tests passed**, including legacy record migration,
+  frozen dataset/label/split/hash preservation across repeated migrations, final
+  holdout reservations, insufficient-data promotion rejection and rollback.
+- Frontend: **7 DOM behavioral tests passed**, TypeScript passed, focused lint
+  passed. **Default `npm run build` passed** with Turbopack on the final checkout
+  after approved local-port access. The earlier sandbox compilation failure is
+  an environment baseline event, not an unresolved production build failure.
+- Full frontend lint: **15 pre-existing legacy errors and 9 warnings**, unchanged
+  from baseline. Rules were not weakened and legacy code was not broadly rewritten.
+- Real loopback HTTP smoke passed: API submission/queue, API restart while queued,
+  separate worker process, evidence/source report, administrator allow/deny,
+  token-free logs and built frontend HTML routes. Worker crash/reclaim behavior
+  is also covered by a real-process backend test. No live-provider requests.
+- Both frontend and preserved root lockfiles installed cleanly with `npm ci`;
+  root installation verification used `/tmp` to preserve local dependencies.
+- Compose configuration validates. Containers and external hosting/gateway setup
+  were not built, provisioned or deployed. Docker/Nixpacks select Python 3.11;
+  local backend verification used Python 3.9.6. Node 22.23.3/npm 10.9.9 were used.
+- Git checks: no tracked node_modules, cookie exports, `.env` credentials or
+  databases; local cookie copy and root installed dependencies remain. Known local
+  credential/cookie values were absent from added lines and verification logs.
+
+## Implemented behavior
+
+Investigation API and separate durable worker are the defaults. Shared database
+and artifact paths are stable across working directories; private deployments
+require explicit absolute shared storage. Startup errors describe missing
+configuration. Readiness checks require migration 5 and correctly handle old
+unmigrated databases without discarding records.
+
+Legacy URL downloads are disabled at the API, Telegram and shared downloader
+boundary because no complete secondary-request egress boundary exists. Optional
+legacy file uploads stream within bounds and clean interrupted/failed receipts.
+Cookies are no longer tracked; historical exposure remains and account-owner
+session review/invalidation is documented.
+
+Retrieval isolates malformed results and database failures per source, preserves
+valid evidence/deduplication, and records partial/failed states with safe incident
+references and protected structural diagnostics. Frontend selection/polling
+responses cannot overwrite later navigation. Stance remains honest triage;
+approved human source-stance review is required for supported/contradicted
+assessments. No machine prediction becomes independent evaluation truth.
+
+Migration 5 adds shared SQLite-backed rate, queue, request/worker concurrency,
+input, source-fetch and provider-cost limits. Missing ordinary live-cost bounds
+disable paid execution. API and worker share policy/usage; reconfiguration and
+restarts do not reset spending. Private mode requires a trusted gateway socket
+peer and separate server-side token, exact Host/Origin configuration and a
+separate administrator token. This remains a shared workspace, not user isolation.
+
+## Remaining limits
+
+- Full legacy frontend lint remains the recorded baseline; full legacy media/ML
+  execution was not tested. Legacy URL ingestion remains intentionally unavailable.
+- Private gateway/firewall/volume ownership and real platform restart behavior
+  require operator setup/validation. Procfile declarations do not provision a
+  worker. Separate ephemeral filesystems cannot run this SQLite architecture.
+- Cost reservations rely on an operator-supplied upper per-search price estimate;
+  they are not actual account billing measurements. Global storage outages still
+  require repair; protect and back up the database and artifact directory.
+- Cookie history was not rewritten and account sessions were not invalidated.
+- Frontend interaction tests use a DOM environment; HTTP smoke checks built HTML,
+  not a live-browser end-to-end journey. Live search/source quality remains
+  unverified. No approved real benchmark data or accuracy/improvement claim was
+  created. Earlier environment counts below are historical, not current assertions.
+
+## Historical milestone-three report (retained)
+
 
 Verified locally on **2026-10-12**. Branch: **`rebuild/investigation-platform`**.
 

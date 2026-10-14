@@ -130,6 +130,23 @@ def test_three_way_training_evaluation_and_one_shot_holdout(client):
         training.train_reviewed(identifier)
     with pytest.raises(ValueError, match='Final holdout'):
         training.promote(failed)
+    # Reapplying additive migrations must preserve frozen labels/hashes/splits,
+    # consumed holdout reservations, active model and decision history verbatim.
+    tables = ['claims', 'assertions', 'evidence_items', 'audit_log_entries',
+              'investigations', 'evidence_details', 'feedback', 'feedback_reviews',
+              'evaluation_datasets', 'evaluation_cases', 'evaluation_labels',
+              'evaluation_reports', 'evaluation_holdout_locks', 'active_ranker', 'model_decisions']
+    def snapshot():
+        with connect() as db:
+            return {table: [tuple(row) for row in db.execute(f'SELECT * FROM {table} ORDER BY rowid')] for table in tables}
+    before = snapshot()
+    from investigation.ranking import artifact_dir
+    artifacts = {path: path.read_bytes() for path in artifact_dir().rglob('*.json')}
+    migrate(); migrate()
+    assert snapshot() == before
+    assert all(path.read_bytes() == content for path, content in artifacts.items())
+    with pytest.raises(ValueError, match='Final holdout'):
+        training.train_reviewed(identifier)
     training.rollback('baseline-v1')
     training.rollback(model_id)
     assert client.get('/api/admin/evaluations').status_code == 403

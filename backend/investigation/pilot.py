@@ -56,7 +56,8 @@ def eligibility(data):
 
 
 def readiness(initialize=False, api_url=None, frontend_url=None):
-    existed = Path(os.getenv('INVESTIGATION_DB', 'deepfake.db')).is_file()
+    from .runtime import storage_path
+    existed = storage_path('INVESTIGATION_DB', 'deepfake.db').is_file()
     if initialize:
         migrate()
     result = {'report_version': SPEC_VERSION, 'created_at': now(), 'credentials': credentials(),
@@ -65,8 +66,10 @@ def readiness(initialize=False, api_url=None, frontend_url=None):
               'reviewed_accuracy': 'not measured', 'services': {}}
     if existed or initialize:
         with connect() as db:
-            result['database']['migrations'] = [r[0] for r in db.execute('SELECT version FROM investigation_migrations ORDER BY version')]
-            if 3 not in result['database']['migrations']:
+            has_migrations = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='investigation_migrations'").fetchone()
+            result['database']['migrations'] = [r[0] for r in db.execute('SELECT version FROM investigation_migrations ORDER BY version')] if has_migrations else []
+            if 5 not in result['database']['migrations']:
+                result['database']['initialized'] = False
                 result['database']['status'] = 'migration required; run readiness --initialize'
                 return redact(result)
             result['counts'] = {table: db.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0] for table in

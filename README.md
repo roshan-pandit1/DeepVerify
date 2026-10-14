@@ -2,11 +2,11 @@
 
 An evidence-based claim investigation platform: **claim/article → editable assertions → durable retrieval worker → assertion-level report → reviewed feedback → persistent research memory**.
 
-This repository includes investigation, source-quality evaluation, and milestone-three live-validation/pilot-review tooling. Next.js and FastAPI are retained. Blockchain, psychological/threat scoring, Telegram, and media forensics remain legacy code outside the investigation entry point. **Real-world evaluation is not yet measured: the checked environment has no SerpAPI key, administrator token, collected benchmark cases, or approved labels. The local database is now initialized.**
+This repository includes investigation, source-quality evaluation, and milestone-three live-validation/pilot-review tooling. Next.js and FastAPI are retained. Blockchain, psychological/threat scoring, Telegram, and media forensics remain legacy code outside the investigation entry point. **Real-world accuracy and ranking improvement remain unmeasured. Remediation checks use isolated synthetic data and do not establish the state of your credentials or production database.** See [current verification and limitations](docs/rebuild-status.md).
 
 ## Setup
 
-Python 3.9+ and Node.js 22.22.2+ (22.x LTS) are supported for the full development/test setup. See frontend/package.json for other compatible Node versions. From the repository root:
+Deployment selects Python 3.11 (`backend/.python-version` and Docker); local checks also passed with Python 3.9.6. Use Node.js 22.22.2+ on the 22.x LTS line for the full development/test setup. See frontend/package.json for other compatible Node versions. From the repository root:
 
 ```sh
 python3 -m venv .venv
@@ -347,8 +347,9 @@ With no selected dataset, these commands deliberately produce pending reports:
 cd backend
 ../.venv/bin/python -m pytest investigation_tests -q
 cd ../frontend
+npm test
 npx tsc --noEmit
-npx eslint src/components/InvestigationWorkspace.tsx src/app/review/page.tsx src/app/evaluation/page.tsx src/lib/investigation-api.ts src/app/page.tsx src/app/history/page.tsx
+npx eslint src/components/InvestigationWorkspace.tsx src/app/review/page.tsx src/app/evaluation/page.tsx src/lib/investigation-api.ts src/app/page.tsx src/app/history/page.tsx tests vitest.config.mts next.config.ts
 npm run build
 cd ../backend
 ../.venv/bin/python -m investigation.smoke --with-frontend
@@ -357,6 +358,10 @@ cd ../backend
 The dedicated investigation tests avoid legacy fixtures that mock unrelated heavyweight media dependencies. The process smoke starts an isolated API, separate worker and optional built frontend, using one explicitly offline case and a temporary admin token. It verifies authorization and secret-free logs, cleans its temporary database, and adds zero real benchmark cases. It does not configure missing real credentials or test browser interactions. Synthetic fixtures check functionality only, not factual accuracy or ranking improvement. See `docs/rebuild-status.md` for results and credential-dependent checks.
 
 ## Recovery
+
+The issue-remediation checkpoints on `rebuild/investigation-platform` are local only. Nothing was pushed or deployed. See [the issue-by-issue record](docs/remediation-status.md).
+
+Historical milestone recovery notes (predating this remediation):
 
 Work is checkpointed on `rebuild/investigation-platform`. Milestones one and two through `983db4e` were pushed after authorization. During the milestone-three pause, the repository acquired foundation commit `55fc57d`; its remote-tracking reflog records an external push. The agent did not perform that push. **Subsequent verification/documentation checkpoints are local only, with remote backup pending authorization; nothing was deployed.** Existing records and legacy code are preserved. Generated datasets, credentials, cookies, databases, source snapshots, reviewer data and model artifacts are not included in commits.
 
@@ -397,6 +402,7 @@ storage. Use the single-host Compose setup instead.
 
 References: [Compose shared volumes](https://docs.docker.com/reference/compose-file/volumes/),
 [Nixpacks configuration](https://nixpacks.com/docs/configuration/file),
+[Nixpacks Python selection](https://nixpacks.com/docs/providers/python),
 [Heroku filesystem isolation](https://devcenter.heroku.com/articles/dyno-isolation).
 
 Legacy media dependencies and `main:app` are excluded from default startup and

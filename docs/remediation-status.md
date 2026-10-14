@@ -185,3 +185,69 @@ no stance-to-relevance training leakage, promotion rejection and rollback.
 Frontend `npm test`: **7 passed**, including visible limitations;
 `npx eslint src/components/InvestigationWorkspace.tsx src/app/review/page.tsx tests`
 passed. No real-world accuracy or ranking improvement was measured.
+
+## Final integration verification
+
+Final backend suite: **120 passed**. Extended the frozen-evaluation test to compare
+records, frozen hashes/splits/labels, holdout reservations, active ranker, decisions
+and artifact bytes before/after repeated migrations, then verify development stays
+closed and rollback still works. Final inspection also found readiness still used
+a working-directory-relative existence check and accepted migration 3; corrected
+it to use the stable storage path and require migration 5. An unmigrated legacy
+file now gets an actionable readiness result without dropping existing tables.
+The new readiness regression passed in the full suite.
+
+Final frontend: **7 behavioral tests passed**, TypeScript and focused lint passed.
+Default **Turbopack `npm run build` passed** after approved port access on the final
+checkout; the old root warning is gone. Full lint remains **15 errors / 9 warnings**,
+the same pre-existing legacy findings. The Webpack production build also passed
+during earlier checkpoints.
+
+Final service smoke **passed with the built frontend**: API → queue → API restart
+→ separate worker → report/source trace, administrator allow/deny and secret-free
+logs. Synthetic data was temporary; no real benchmark cases or labels were added.
+Compose configuration validates, but container images and real hosting were not
+executed. Deployment Python is explicitly 3.11; tests ran on Python 3.9.6.
+
+Exact final commands from the repository root (Node 22.23.3 was on PATH via
+`export PATH=/tmp/node-v22.23.3-darwin-arm64/bin:$PATH` in this session):
+
+```sh
+cd backend
+../.venv/bin/python -m pytest investigation_tests -q
+cd ../frontend
+npm test
+npx tsc --noEmit
+npx eslint src/components/InvestigationWorkspace.tsx src/app/review/page.tsx src/app/evaluation/page.tsx src/lib/investigation-api.ts src/app/page.tsx src/app/history/page.tsx tests vitest.config.mts next.config.ts
+npm run lint
+npm run build
+cd ../backend
+../.venv/bin/python -m investigation.smoke --with-frontend
+cd ..
+DEEPVERIFY_DATA_DIR=/tmp docker compose --env-file backend/.env.investigation.example config --no-env-resolution --quiet
+bash -n backend/start.sh
+git diff --check
+git diff --cached --check
+git ls-files 'node_modules/**' '**/node_modules/**' '*cookies*' '*.env' '*.db'
+```
+
+`npm run lint` is the sole failing final code check, with the unchanged baseline
+legacy findings. Known local credentials/cookie values were scanned privately
+against added lines and verification logs; no values were printed. The final
+tracked-path query is empty. No real database migration, live search, deployment,
+push, Git-history rewrite or account/session invalidation was performed.
+
+| Step | Local checkpoint |
+| --- | --- |
+| 1. Runnable baseline | `772e023` |
+| 2. API/worker startup | `724ee93` |
+| 3. Legacy URL rejection | `a41af34` |
+| 4. Bounded uploads | `58a9d7f` |
+| 5. Cookie untracking | `884c5a8` |
+| 6. Result isolation | `1096001` |
+| 7. Frontend response ordering | `2cc441a` |
+| 8. Dependency untracking | `18637a0` |
+| 9. Private boundary/budgets | `accd8fd` |
+| 10. Stance limitations | `cb6c658` |
+
+The final verification/documentation checkpoint follows these in `git log`.
